@@ -1,0 +1,19 @@
+services:
+  trading_bot:
+    build: .
+    container_name: trading_bot
+    restart: unless-stopped
+
+    environment:
+      DATABENTO_API_KEY: ${DATABENTO_API_KEY}
+      ETRADE_CONSUMER_KEY: ${ETRADE_CONSUMER_KEY}
+      ETRADE_CONSUMER_SECRET: ${ETRADE_CONSUMER_SECRET}
+
+    # Keeps stdin open so you can paste the E*TRADE OAuth verifier code
+    stdin_open: true
+    tty: true
+
+    volumes:
+      # Persist logs outside the container
+      - ./logs:/app/logs
+      - ./historical_data:/app/historical_data
