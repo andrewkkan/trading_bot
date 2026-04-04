@@ -96,9 +96,10 @@ async def run_live(paper: bool = False):
     broker = None
     if not paper:
         broker = ETradeClient(
-            consumer_key   = Config.ETRADE_CONSUMER_KEY,
-            consumer_secret= Config.ETRADE_CONSUMER_SECRET,
-            sandbox        = Config.SANDBOX_MODE,
+            consumer_key    = Config.ETRADE_CONSUMER_KEY,
+            consumer_secret = Config.ETRADE_CONSUMER_SECRET,
+            sandbox         = Config.SANDBOX_MODE,
+            account_id      = Config.ETRADE_ACCOUNT_ID,
         )
         broker.authenticate()
 

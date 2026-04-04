@@ -82,12 +82,28 @@ class OptionOrder:
 # ---------------------------------------------------------------------------
 
 class ETradeClient:
-    def __init__(self, consumer_key: str, consumer_secret: str, sandbox: bool = True):
+    def __init__(
+        self,
+        consumer_key:    str,
+        consumer_secret: str,
+        sandbox:         bool = True,
+        account_id:      str | None = None,
+    ):
+        """
+        Args:
+            consumer_key    : E*TRADE OAuth consumer key
+            consumer_secret : E*TRADE OAuth consumer secret
+            sandbox         : True = sandbox (no real money), False = live
+            account_id      : the accountIdKey to trade on. If None, the first
+                              account returned by E*TRADE is used and all
+                              available accounts are printed so you can identify
+                              the correct one to set in config.py.
+        """
         self.consumer_key    = consumer_key
         self.consumer_secret = consumer_secret
         self.base_url        = BASE_URL_SANDBOX if sandbox else BASE_URL_LIVE
-        self.session: OAuth1Session | None = None
-        self.account_id: str | None = None
+        self.session:    OAuth1Session | None = None
+        self._configured_account_id = account_id  # from config — may be None
 
     # -----------------------------------------------------------------------
     # Authentication
@@ -96,7 +112,7 @@ class ETradeClient:
     def authenticate(self):
         """
         Full OAuth 1.0a flow. Requires a one-time browser step per session.
-        Saves an authenticated session for all subsequent API calls.
+        Saves an authenticated session and resolves the target account ID.
         """
         # Step 1 — request token
         oauth = OAuth1Session(self.consumer_key, client_secret=self.consumer_secret)
@@ -109,7 +125,7 @@ class ETradeClient:
             f"https://us.etrade.com/e/t/etws/authorize"
             f"?key={self.consumer_key}&token={owner_key}"
         )
-        logger.info(f"Opening browser for E*TRADE authorization...")
+        logger.info("Opening browser for E*TRADE authorization...")
         webbrowser.open(auth_url)
         verifier = input("Paste the verifier code from E*TRADE: ").strip()
 
@@ -131,18 +147,75 @@ class ETradeClient:
         )
 
         logger.info("E*TRADE authentication successful.")
-        self.account_id = self._fetch_account_id()
+        self.account_id = self._resolve_account_id()
 
-    def _fetch_account_id(self) -> str:
-        """Return the accountIdKey of the first account on the profile."""
+    def list_accounts(self) -> list[dict]:
+        """
+        Return all accounts on the profile as a list of dicts.
+
+        Each dict contains:
+            accountId       : human-readable account number (e.g. "12345678")
+            accountIdKey    : the key used in API calls — use this in config.py
+            accountType     : e.g. "INDIVIDUAL", "IRA", "MARGIN"
+            accountDesc     : friendly description set in E*TRADE
+            accountMode     : "CASH" or "MARGIN"
+            accountStatus   : "ACTIVE", "CLOSED", etc.
+
+        Call this after authenticate() to discover your accountIdKey values.
+        """
+        self._require_auth()
         url  = f"{self.base_url}/v1/accounts/list"
         resp = self.session.get(url, headers={"Accept": "application/json"})
         resp.raise_for_status()
-        account_id = (
-            resp.json()["AccountListResponse"]["Accounts"]["Account"][0]["accountIdKey"]
+        return resp.json()["AccountListResponse"]["Accounts"]["Account"]
+
+    def _resolve_account_id(self) -> str:
+        """
+        Resolve which account to trade on.
+
+        Resolution order:
+          1. ETRADE_ACCOUNT_ID in config / constructor  → use it directly
+             (raises if the ID is not found on the profile)
+          2. Not configured → use the first account and print a table of all
+             accounts so the user can identify the correct one for config.py
+        """
+        accounts = self.list_accounts()
+
+        # Always log the full account table so it's visible in the logs
+        logger.info("─" * 60)
+        logger.info("  E*TRADE accounts on this profile:")
+        logger.info(f"  {'accountIdKey':<30} {'accountId':<15} {'type':<12} {'description'}")
+        logger.info("─" * 60)
+        for acct in accounts:
+            marker = ""
+            if self._configured_account_id and acct["accountIdKey"] == self._configured_account_id:
+                marker = "  ← active"
+            logger.info(
+                f"  {acct['accountIdKey']:<30} "
+                f"{acct.get('accountId',''):<15} "
+                f"{acct.get('accountType',''):<12} "
+                f"{acct.get('accountDesc','')}{marker}"
+            )
+        logger.info("─" * 60)
+
+        # Use the configured ID if provided
+        if self._configured_account_id:
+            keys = [a["accountIdKey"] for a in accounts]
+            if self._configured_account_id not in keys:
+                raise ValueError(
+                    f"ETRADE_ACCOUNT_ID '{self._configured_account_id}' not found "
+                    f"on this profile. Available keys: {keys}"
+                )
+            logger.info(f"Using configured account: {self._configured_account_id}")
+            return self._configured_account_id
+
+        # Fall back to first account
+        first = accounts[0]["accountIdKey"]
+        logger.warning(
+            f"ETRADE_ACCOUNT_ID not set in config — defaulting to first account: {first}. "
+            f"Set ETRADE_ACCOUNT_ID in config.py to make this explicit."
         )
-        logger.info(f"Using account: {account_id}")
-        return account_id
+        return first
 
     # -----------------------------------------------------------------------
     # Equity orders

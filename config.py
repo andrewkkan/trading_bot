@@ -14,9 +14,15 @@ class Config:
     SCHEMA   = "ohlcv-1s"
 
     # --- E*TRADE ---
-    ETRADE_CONSUMER_KEY    = os.getenv("ETRADE_CONSUMER_KEY", "YOUR_KEY")
+    ETRADE_CONSUMER_KEY    = os.getenv("ETRADE_CONSUMER_KEY",    "YOUR_KEY")
     ETRADE_CONSUMER_SECRET = os.getenv("ETRADE_CONSUMER_SECRET", "YOUR_SECRET")
     SANDBOX_MODE = True
+
+    # Which account to trade on. Set this to the accountIdKey shown in the
+    # log table after your first authenticate() call, e.g. "AbCdEfGhIjKlMnOp".
+    # Leave as None to default to the first account (not recommended if you
+    # have multiple accounts).
+    ETRADE_ACCOUNT_ID = os.getenv("ETRADE_ACCOUNT_ID", None)
 
     # --- Risk ---
     MAX_DAILY_LOSS     = 1000.0     # stop trading for the day beyond this loss
