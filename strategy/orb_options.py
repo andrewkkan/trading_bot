@@ -109,6 +109,11 @@ class ORBOptionsStrategy(ORBBase):
         strike_interval:       float = 1.0,
         max_risk_per_trade:    float = 500.0,
         max_daily_loss:        float = 1000.0,
+        max_window_multiplier: int   = 16,
+        min_range_pct:         float = 0.5,
+        rolling_lookback_days: int   = 50,
+        min_bootstrap_days:    int   = 5,
+        confirm_bars:          int   = 3,
         use_real_pricing:      bool  = False,
         spread_pct:            float = 0.05,
     ):
@@ -125,6 +130,11 @@ class ORBOptionsStrategy(ORBBase):
             opening_range_minutes = opening_range_minutes,
             rr_ratio              = rr_ratio,
             max_daily_loss        = max_daily_loss,
+            max_window_multiplier = max_window_multiplier,
+            min_range_pct         = min_range_pct,
+            rolling_lookback_days = rolling_lookback_days,
+            min_bootstrap_days    = min_bootstrap_days,
+            confirm_bars          = confirm_bars,
         )
 
     # -----------------------------------------------------------------------

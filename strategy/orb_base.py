@@ -12,7 +12,7 @@ What the base class owns (final — do not override):
   - Market hours gate
   - Daily loss limit
   - Opening range construction (via RangeBuilder — adaptive, validated)
-  - Breakout detection   (both LONG and SHORT)
+  - Breakout detection   (both LONG and SHORT, N-bar confirmation)
   - Position management  (stop/target on underlying price)
   - EOD flatten
 
@@ -63,13 +63,16 @@ class ORBDayState:
     range_width:    float = 0.0
     range_skipped:  bool  = False   # True when day was skipped (too narrow)
     # Signal / position
-    trade_fired:    bool  = False
-    direction:      str   = ""      # "LONG" or "SHORT"
-    position:       int   = 0       # non-zero = in a trade
-    entry_price:    float = 0.0
-    stop_price:     float = 0.0
-    target_price:   float = 0.0
-    daily_pnl:      float = 0.0
+    trade_fired:         bool  = False
+    direction:           str   = ""      # "LONG" or "SHORT"
+    position:            int   = 0       # non-zero = in a trade
+    entry_price:         float = 0.0
+    stop_price:          float = 0.0
+    target_price:        float = 0.0
+    daily_pnl:           float = 0.0
+    # Breakout confirmation counters
+    long_confirm_count:  int   = 0   # consecutive closes above range_high
+    short_confirm_count: int   = 0   # consecutive closes below range_low
 
 
 # ---------------------------------------------------------------------------
@@ -89,6 +92,7 @@ class ORBBase(ABC):
         min_range_pct         : range must be >= this × rolling avg (default 0.5)
         rolling_lookback_days : days in rolling avg (default 50)
         min_bootstrap_days    : samples needed before validation applied (default 5)
+        confirm_bars          : consecutive closes required to confirm breakout (default 3)
     """
 
     def __init__(
@@ -101,11 +105,13 @@ class ORBBase(ABC):
         min_range_pct:         float = 0.5,
         rolling_lookback_days: int   = 50,
         min_bootstrap_days:    int   = 5,
+        confirm_bars:          int   = 3,
     ):
         self.symbol                = symbol
         self.opening_range_minutes = opening_range_minutes
         self.rr_ratio              = rr_ratio
         self.max_daily_loss        = max_daily_loss
+        self.confirm_bars          = confirm_bars
 
         self._range_builder = RangeBuilder(
             opening_range_minutes = opening_range_minutes,
@@ -252,17 +258,48 @@ class ORBBase(ABC):
     def _check_breakout(
         self, bar_close: float, bar_date: date, bar_time: time,
     ) -> Any:
-        """Detect breakout — both directions. One trade per day."""
+        """
+        Detect breakout with N-consecutive-bar confirmation.
+
+        Counters are independent — a cross to the opposite side resets
+        the active counter to 0 and starts the other at 1.
+        One trade per day; once trade_fired is True this method is a no-op.
+        """
         if self.state.trade_fired:
             return None
 
-        if bar_close > self.state.range_high:
-            direction = "LONG"
-        elif bar_close < self.state.range_low:
-            direction = "SHORT"
+        above = bar_close > self.state.range_high
+        below = bar_close < self.state.range_low
+
+        # Update counters — crossing to the other side resets both
+        if above:
+            self.state.long_confirm_count  += 1
+            self.state.short_confirm_count  = 0
+        elif below:
+            self.state.short_confirm_count += 1
+            self.state.long_confirm_count   = 0
         else:
+            # Bar closed back inside the range — reset both
+            self.state.long_confirm_count  = 0
+            self.state.short_confirm_count = 0
             return None
 
+        # Check if either direction has reached the confirmation threshold
+        if self.state.long_confirm_count >= self.confirm_bars:
+            direction = "LONG"
+        elif self.state.short_confirm_count >= self.confirm_bars:
+            direction = "SHORT"
+        else:
+            # Still accumulating — log progress on first and subsequent bars
+            count = self.state.long_confirm_count if above else self.state.short_confirm_count
+            side  = "LONG" if above else "SHORT"
+            logger.debug(
+                f"  Confirmation {count}/{self.confirm_bars} {side} "
+                f"@ {bar_close:.4f}"
+            )
+            return None
+
+        # Confirmation achieved — arm the trade
         self.state.trade_fired  = True
         self.state.direction    = direction
         self.state.position     = 1
@@ -280,7 +317,9 @@ class ORBBase(ABC):
             )
 
         logger.info(
-            f"  BREAKOUT {direction} @ {bar_close:.4f} | "
+            f"  BREAKOUT CONFIRMED {direction} "
+            f"({self.confirm_bars} consecutive bars) "
+            f"@ {bar_close:.4f} | "
             f"stop={self.state.stop_price:.4f} | "
             f"target={self.state.target_price:.4f}"
         )

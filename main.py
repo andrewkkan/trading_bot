@@ -39,6 +39,7 @@ def run_equity_backtest():
         min_range_pct         = Config.ORB_MIN_RANGE_PCT,
         rolling_lookback_days = Config.ORB_ROLLING_LOOKBACK_DAYS,
         min_bootstrap_days    = Config.ORB_MIN_BOOTSTRAP_DAYS,
+        confirm_bars          = Config.ORB_CONFIRM_BARS,
     )
     store = db.DBNStore.from_file(Config.HISTORICAL_DATA_PATH)
     total_bars = total_orders = 0
@@ -97,6 +98,7 @@ async def run_live(paper: bool = False):
         min_range_pct         = Config.ORB_MIN_RANGE_PCT,
         rolling_lookback_days = Config.ORB_ROLLING_LOOKBACK_DAYS,
         min_bootstrap_days    = Config.ORB_MIN_BOOTSTRAP_DAYS,
+        confirm_bars          = Config.ORB_CONFIRM_BARS,
         use_real_pricing      = False,
     )
 
