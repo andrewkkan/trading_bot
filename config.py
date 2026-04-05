@@ -32,6 +32,12 @@ class Config:
     ORB_OPENING_RANGE_MINUTES = 15
     ORB_RR_RATIO              = 2.0
 
+    # --- ORB range validation ---
+    ORB_MAX_WINDOW_MULTIPLIER = 16      # cap expansion at 16× initial window
+    ORB_MIN_RANGE_PCT         = 0.5     # range must be >= 50% of rolling avg
+    ORB_ROLLING_LOOKBACK_DAYS = 50      # rolling avg window (days)
+    ORB_MIN_BOOTSTRAP_DAYS    = 5       # samples before validation kicks in
+
     # --- ORB Options ---
     ORB_TARGET_DTE        = 1       # 0=same day, 1=next day, 7=weekly
     ORB_STRIKE_OFFSET_PCT = 0.0     # 0.0=ATM, 0.005=0.5% OTM

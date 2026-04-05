@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import time, date
 
 from strategy.orb_base import ORBBase, ORBDayState
+from strategy.range_builder import RangeResult
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -72,12 +73,14 @@ class ORBStrategy(ORBBase):
             f"RR: {self.rr_ratio}× | qty: {self.quantity} shares"
         )
 
-    def _on_range_set(self) -> None:
+    def _on_range_set(self, result: RangeResult) -> None:
+        prior = " (+ prior day)" if result.used_prior_day else ""
         logger.info(
-            f"  Range set: "
-            f"high={self.state.range_high:.4f}  "
-            f"low={self.state.range_low:.4f}  "
-            f"width={self.state.range_width:.4f}"
+            f"  Range set{prior}: "
+            f"high={result.high:.4f}  "
+            f"low={result.low:.4f}  "
+            f"width={result.width:.4f}  "
+            f"window={result.window_minutes}m"
         )
 
     def _on_entry(

@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from datetime import time, date
 
 from strategy.orb_base import ORBBase, ORBDayState
+from strategy.range_builder import RangeResult
 from strategy.option_pricing import (
     price_option, get_iv_estimate, select_strike,
     days_to_nearest_expiry, OptionPrice,
@@ -142,12 +143,14 @@ class ORBOptionsStrategy(ORBBase):
             f"Risk/trade: ${self.max_risk_per_trade:.0f}"
         )
 
-    def _on_range_set(self) -> None:
+    def _on_range_set(self, result: RangeResult) -> None:
+        prior = " (+ prior day)" if result.used_prior_day else ""
         logger.info(
-            f"  Range set: "
-            f"high={self.state.range_high:.2f}  "
-            f"low={self.state.range_low:.2f}  "
-            f"width={self.state.range_width:.2f}"
+            f"  Range set{prior}: "
+            f"high={result.high:.2f}  "
+            f"low={result.low:.2f}  "
+            f"width={result.width:.2f}  "
+            f"window={result.window_minutes}m"
         )
 
     def _on_entry(

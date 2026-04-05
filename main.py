@@ -35,6 +35,10 @@ def run_equity_backtest():
         opening_range_minutes = Config.ORB_OPENING_RANGE_MINUTES,
         rr_ratio              = Config.ORB_RR_RATIO,
         max_daily_loss        = Config.MAX_DAILY_LOSS,
+        max_window_multiplier = Config.ORB_MAX_WINDOW_MULTIPLIER,
+        min_range_pct         = Config.ORB_MIN_RANGE_PCT,
+        rolling_lookback_days = Config.ORB_ROLLING_LOOKBACK_DAYS,
+        min_bootstrap_days    = Config.ORB_MIN_BOOTSTRAP_DAYS,
     )
     store = db.DBNStore.from_file(Config.HISTORICAL_DATA_PATH)
     total_bars = total_orders = 0
@@ -84,12 +88,15 @@ async def run_live(paper: bool = False):
     strategy = ORBOptionsStrategy(
         symbol                = Config.SYMBOLS[0],
         opening_range_minutes = Config.ORB_OPENING_RANGE_MINUTES,
+        rr_ratio              = Config.ORB_RR_RATIO,
         target_dte            = Config.ORB_TARGET_DTE,
         strike_offset_pct     = Config.ORB_STRIKE_OFFSET_PCT,
         max_risk_per_trade    = Config.MAX_RISK_PER_TRADE,
-        stop_loss_pct         = Config.ORB_STOP_LOSS_PCT,
-        target_mult           = Config.ORB_TARGET_MULT,
         max_daily_loss        = Config.MAX_DAILY_LOSS,
+        max_window_multiplier = Config.ORB_MAX_WINDOW_MULTIPLIER,
+        min_range_pct         = Config.ORB_MIN_RANGE_PCT,
+        rolling_lookback_days = Config.ORB_ROLLING_LOOKBACK_DAYS,
+        min_bootstrap_days    = Config.ORB_MIN_BOOTSTRAP_DAYS,
         use_real_pricing      = False,
     )
 
