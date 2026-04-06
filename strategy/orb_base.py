@@ -12,7 +12,7 @@ What the base class owns (final — do not override):
   - Market hours gate
   - Daily loss limit
   - Opening range construction (via RangeBuilder — adaptive, validated)
-  - Breakout detection   (both LONG and SHORT, N-bar confirmation)
+  - Breakout detection   (both LONG and SHORT, N-bar confirmation, entry cutoff)
   - Position management  (stop/target on underlying price)
   - EOD flatten
 
@@ -93,6 +93,7 @@ class ORBBase(ABC):
         rolling_lookback_days : days in rolling avg (default 50)
         min_bootstrap_days    : samples needed before validation applied (default 5)
         confirm_bars          : consecutive closes required to confirm breakout (default 3)
+        min_hold_minutes      : minimum minutes between entry and EOD close (default 30)
     """
 
     def __init__(
@@ -106,12 +107,14 @@ class ORBBase(ABC):
         rolling_lookback_days: int   = 50,
         min_bootstrap_days:    int   = 5,
         confirm_bars:          int   = 3,
+        min_hold_minutes:      int   = 30,
     ):
         self.symbol                = symbol
         self.opening_range_minutes = opening_range_minutes
         self.rr_ratio              = rr_ratio
         self.max_daily_loss        = max_daily_loss
         self.confirm_bars          = confirm_bars
+        self.min_hold_minutes      = min_hold_minutes
 
         self._range_builder = RangeBuilder(
             opening_range_minutes = opening_range_minutes,
@@ -266,6 +269,19 @@ class ORBBase(ABC):
         One trade per day; once trade_fired is True this method is a no-op.
         """
         if self.state.trade_fired:
+            return None
+
+        # Latest entry cutoff — don't start a new trade if there isn't
+        # enough time left for a meaningful hold before EOD close.
+        # Cutoff = MARKET_CLOSE - min_hold_minutes - confirm_bars seconds
+        # (confirm_bars seconds account for the time still needed to confirm)
+        cutoff_seconds = (
+            MARKET_CLOSE.hour * 3600 + MARKET_CLOSE.minute * 60
+            - self.min_hold_minutes * 60
+            - self.confirm_bars
+        )
+        bar_seconds = bar_time.hour * 3600 + bar_time.minute * 60 + bar_time.second
+        if bar_seconds >= cutoff_seconds:
             return None
 
         above = bar_close > self.state.range_high

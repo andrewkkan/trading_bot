@@ -38,6 +38,7 @@ class Config:
     ORB_ROLLING_LOOKBACK_DAYS = 50      # rolling avg window (days)
     ORB_MIN_BOOTSTRAP_DAYS    = 5       # samples before validation kicks in
     ORB_CONFIRM_BARS          = 3       # consecutive closes needed to confirm breakout
+    ORB_MIN_HOLD_MINUTES      = 30      # min minutes between entry and EOD close
 
     # --- ORB Options ---
     ORB_TARGET_DTE        = 1       # 0=same day, 1=next day, 7=weekly

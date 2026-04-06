@@ -55,6 +55,7 @@ class ORBStrategy(ORBBase):
         rolling_lookback_days: int   = 50,
         min_bootstrap_days:    int   = 5,
         confirm_bars:          int   = 3,
+        min_hold_minutes:      int   = 30,
     ):
         self.quantity = quantity
         super().__init__(
@@ -67,6 +68,7 @@ class ORBStrategy(ORBBase):
             rolling_lookback_days = rolling_lookback_days,
             min_bootstrap_days    = min_bootstrap_days,
             confirm_bars          = confirm_bars,
+            min_hold_minutes      = min_hold_minutes,
         )
 
     # -----------------------------------------------------------------------

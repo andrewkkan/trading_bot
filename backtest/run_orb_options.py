@@ -36,12 +36,17 @@ RESULTS_DIR = os.path.join(os.path.dirname(__file__), "results")
 
 def run_backtest(
     opening_range_minutes: int   = 15,
+    rr_ratio:              float = 2.0,
     target_dte:            int   = 1,
     strike_offset_pct:     float = 0.0,
     max_risk_per_trade:    float = 500.0,
-    stop_loss_pct:         float = 0.50,
-    target_mult:           float = 2.0,
     max_daily_loss:        float = 1000.0,
+    max_window_multiplier: int   = 16,
+    min_range_pct:         float = 0.5,
+    rolling_lookback_days: int   = 50,
+    min_bootstrap_days:    int   = 5,
+    confirm_bars:          int   = 3,
+    min_hold_minutes:      int   = 30,
     label:                 str   = "default",
 ) -> dict:
     """
@@ -51,22 +56,27 @@ def run_backtest(
     logger.info("=" * 65)
     logger.info(f"BACKTEST: ORB Options  [{label}]")
     logger.info(
-        f"  ORB window={opening_range_minutes}m  DTE={target_dte}  "
-        f"offset={strike_offset_pct:.1%}  "
+        f"  ORB window={opening_range_minutes}m  RR={rr_ratio}x  "
+        f"DTE={target_dte}  offset={strike_offset_pct:.1%}  "
         f"risk/trade=${max_risk_per_trade:.0f}  "
-        f"stop={stop_loss_pct:.0%}  target={target_mult:.1f}×"
+        f"confirm={confirm_bars} bars  min_hold={min_hold_minutes}m"
     )
     logger.info("=" * 65)
 
     strategy = ORBOptionsStrategy(
         symbol                = Config.SYMBOLS[0],
         opening_range_minutes = opening_range_minutes,
+        rr_ratio              = rr_ratio,
         target_dte            = target_dte,
         strike_offset_pct     = strike_offset_pct,
         max_risk_per_trade    = max_risk_per_trade,
-        stop_loss_pct         = stop_loss_pct,
-        target_mult           = target_mult,
         max_daily_loss        = max_daily_loss,
+        max_window_multiplier = max_window_multiplier,
+        min_range_pct         = min_range_pct,
+        rolling_lookback_days = rolling_lookback_days,
+        min_bootstrap_days    = min_bootstrap_days,
+        confirm_bars          = confirm_bars,
+        min_hold_minutes      = min_hold_minutes,
         use_real_pricing      = False,
     )
 
@@ -235,24 +245,25 @@ def sweep_parameters():
     Edit the grids below to suit your exploration.
     """
     configs = [
-        # (opening_range_minutes, target_dte, stop_loss_pct, target_mult, label)
-        (5,  0, 0.50, 2.0, "ORB5m_0DTE_50stop_2x"),
-        (5,  1, 0.50, 2.0, "ORB5m_1DTE_50stop_2x"),
-        (15, 0, 0.50, 2.0, "ORB15m_0DTE_50stop_2x"),
-        (15, 1, 0.50, 2.0, "ORB15m_1DTE_50stop_2x"),
-        (15, 1, 0.50, 3.0, "ORB15m_1DTE_50stop_3x"),
-        (15, 1, 0.35, 2.0, "ORB15m_1DTE_35stop_2x"),
-        (30, 1, 0.50, 2.0, "ORB30m_1DTE_50stop_2x"),
-        (30, 7, 0.50, 2.0, "ORB30m_7DTE_50stop_2x"),
+        # (orb_min, rr_ratio, dte, confirm_bars, min_hold, label)
+        (5,  2.0, 0, 3, 30, "ORB5m_0DTE_RR2_conf3"),
+        (5,  2.0, 1, 3, 30, "ORB5m_1DTE_RR2_conf3"),
+        (15, 2.0, 0, 3, 30, "ORB15m_0DTE_RR2_conf3"),
+        (15, 2.0, 1, 3, 30, "ORB15m_1DTE_RR2_conf3"),
+        (15, 3.0, 1, 3, 30, "ORB15m_1DTE_RR3_conf3"),
+        (15, 2.0, 1, 5, 30, "ORB15m_1DTE_RR2_conf5"),
+        (30, 2.0, 1, 3, 30, "ORB30m_1DTE_RR2_conf3"),
+        (30, 2.0, 7, 3, 30, "ORB30m_7DTE_RR2_conf3"),
     ]
 
     results = []
-    for (orb_min, dte, stop, target, lbl) in configs:
+    for (orb_min, rr, dte, confirm, hold, lbl) in configs:
         summary = run_backtest(
             opening_range_minutes = orb_min,
+            rr_ratio              = rr,
             target_dte            = dte,
-            stop_loss_pct         = stop,
-            target_mult           = target,
+            confirm_bars          = confirm,
+            min_hold_minutes      = hold,
             label                 = lbl,
         )
         results.append(summary)
@@ -289,11 +300,16 @@ if __name__ == "__main__":
     else:
         run_backtest(
             opening_range_minutes = Config.ORB_OPENING_RANGE_MINUTES,
+            rr_ratio              = Config.ORB_RR_RATIO,
             target_dte            = Config.ORB_TARGET_DTE,
             strike_offset_pct     = Config.ORB_STRIKE_OFFSET_PCT,
             max_risk_per_trade    = Config.MAX_RISK_PER_TRADE,
-            stop_loss_pct         = Config.ORB_STOP_LOSS_PCT,
-            target_mult           = Config.ORB_TARGET_MULT,
             max_daily_loss        = Config.MAX_DAILY_LOSS,
+            max_window_multiplier = Config.ORB_MAX_WINDOW_MULTIPLIER,
+            min_range_pct         = Config.ORB_MIN_RANGE_PCT,
+            rolling_lookback_days = Config.ORB_ROLLING_LOOKBACK_DAYS,
+            min_bootstrap_days    = Config.ORB_MIN_BOOTSTRAP_DAYS,
+            confirm_bars          = Config.ORB_CONFIRM_BARS,
+            min_hold_minutes      = Config.ORB_MIN_HOLD_MINUTES,
             label                 = "single_run",
         )
