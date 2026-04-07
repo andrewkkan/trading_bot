@@ -43,6 +43,8 @@ def run_equity_backtest():
         min_hold_minutes      = Config.ORB_MIN_HOLD_MINUTES,
         gap_lookback_days     = Config.GAP_LOOKBACK_DAYS,
         gap_none_threshold    = Config.GAP_NONE_THRESHOLD,
+        vol_lookback_days     = Config.VOL_LOOKBACK_DAYS,
+        vol_bars_to_track     = Config.VOL_BARS_TO_TRACK,
     )
     store = db.DBNStore.from_file(Config.HISTORICAL_DATA_PATH)
     total_bars = total_orders = 0
@@ -77,6 +79,8 @@ def run_options_backtest():
         min_bootstrap_days    = Config.ORB_MIN_BOOTSTRAP_DAYS,
         confirm_bars          = Config.ORB_CONFIRM_BARS,
         min_hold_minutes      = Config.ORB_MIN_HOLD_MINUTES,
+        vol_lookback_days     = Config.VOL_LOOKBACK_DAYS,
+        vol_bars_to_track     = Config.VOL_BARS_TO_TRACK,
         label                 = "orb_options",
     )
 
@@ -110,6 +114,8 @@ async def run_live(paper: bool = False):
         min_hold_minutes      = Config.ORB_MIN_HOLD_MINUTES,
         gap_lookback_days     = Config.GAP_LOOKBACK_DAYS,
         gap_none_threshold    = Config.GAP_NONE_THRESHOLD,
+        vol_lookback_days     = Config.VOL_LOOKBACK_DAYS,
+        vol_bars_to_track     = Config.VOL_BARS_TO_TRACK,
         use_real_pricing      = False,
     )
 

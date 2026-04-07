@@ -58,6 +58,8 @@ class ORBStrategy(ORBBase):
         min_hold_minutes:      int   = 30,
         gap_lookback_days:     int   = 50,
         gap_none_threshold:    float = 0.001,
+        vol_lookback_days:     int   = 50,
+        vol_bars_to_track:     int   = 20,
     ):
         self.quantity = quantity
         super().__init__(
@@ -73,6 +75,8 @@ class ORBStrategy(ORBBase):
             min_hold_minutes      = min_hold_minutes,
             gap_lookback_days     = gap_lookback_days,
             gap_none_threshold    = gap_none_threshold,
+            vol_lookback_days     = vol_lookback_days,
+            vol_bars_to_track     = vol_bars_to_track,
         )
 
     # -----------------------------------------------------------------------

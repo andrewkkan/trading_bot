@@ -13,6 +13,7 @@ What the base class owns (final — do not override):
   - Daily loss limit
   - Opening range construction (via RangeBuilder — adaptive, validated)
   - Gap detection per day (via GapDetector — stored on state, annotation only)
+  - Volume evaluation at breakout (via VolumeEvaluator — stored on state, annotation only)
   - Breakout detection   (both LONG and SHORT, N-bar confirmation, entry cutoff)
   - Position management  (stop/target on underlying price)
   - EOD flatten
@@ -42,6 +43,7 @@ from typing import Any
 
 from strategy.range_builder import RangeBuilder, RangeResult
 from strategy.gap_detector import GapDetector, GapSignal
+from strategy.volume_evaluator import VolumeEvaluator, VolumeSignal
 from strategy.utils import ns_to_et, MARKET_OPEN, MARKET_CLOSE
 from utils.logger import get_logger
 
@@ -65,6 +67,7 @@ class ORBDayState:
     range_width:    float = 0.0
     range_skipped:  bool  = False   # True when day was skipped (too narrow)
     gap_signal:     object = None    # GapSignal — set on first bar at market open
+    volume_signal:  object = None    # VolumeSignal — set when breakout is confirmed
     # Signal / position
     trade_fired:         bool  = False
     direction:           str   = ""      # "LONG" or "SHORT"
@@ -99,6 +102,8 @@ class ORBBase(ABC):
         min_hold_minutes      : minimum minutes between entry and EOD close (default 30)
         gap_lookback_days     : rolling avg lookback for gap history (default 50)
         gap_none_threshold    : abs(gap_pct) below this = NONE direction (default 0.001)
+        vol_lookback_days     : rolling avg lookback for volume history (default 50)
+        vol_bars_to_track     : sliding window of recent bar volumes (default 20)
     """
 
     def __init__(
@@ -115,6 +120,8 @@ class ORBBase(ABC):
         min_hold_minutes:      int   = 30,
         gap_lookback_days:     int   = 50,
         gap_none_threshold:    float = 0.001,
+        vol_lookback_days:     int   = 50,
+        vol_bars_to_track:     int   = 20,
     ):
         self.symbol                = symbol
         self.opening_range_minutes = opening_range_minutes
@@ -135,6 +142,12 @@ class ORBBase(ABC):
             rolling_lookback_days = gap_lookback_days,
             min_bootstrap_days    = min_bootstrap_days,
             none_threshold        = gap_none_threshold,
+        )
+
+        self._volume_evaluator = VolumeEvaluator(
+            rolling_lookback_days = vol_lookback_days,
+            min_bootstrap_days    = min_bootstrap_days,
+            bars_to_track         = vol_bars_to_track,
         )
 
         self._current_date = None
@@ -224,6 +237,13 @@ class ORBBase(ABC):
         )
         if gap_signal is not None and gap_signal.is_new:
             self.state.gap_signal = gap_signal
+
+        # Feed volume evaluator — updates rolling state on every bar
+        self._volume_evaluator.on_bar(
+            bar_date   = bar_date,
+            bar_time   = bar_time,
+            bar_volume = record.volume,
+        )
 
         if bar_time < MARKET_OPEN or bar_time >= MARKET_CLOSE:
             return None
@@ -365,6 +385,12 @@ class ORBBase(ABC):
             f"@ {bar_close:.4f} | "
             f"stop={self.state.stop_price:.4f} | "
             f"target={self.state.target_price:.4f}"
+        )
+
+        # Evaluate volume at the moment of confirmation
+        self.state.volume_signal = self._volume_evaluator.evaluate(
+            confirm_bars = self.confirm_bars,
+            trade_date   = bar_date,
         )
 
         return self._on_entry(direction, bar_close, bar_date, bar_time)

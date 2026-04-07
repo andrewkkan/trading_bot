@@ -47,6 +47,8 @@ def run_backtest(
     min_bootstrap_days:    int   = 5,
     confirm_bars:          int   = 3,
     min_hold_minutes:      int   = 30,
+    vol_lookback_days:     int   = 50,
+    vol_bars_to_track:     int   = 20,
     label:                 str   = "default",
 ) -> dict:
     """
@@ -77,6 +79,8 @@ def run_backtest(
         min_bootstrap_days    = min_bootstrap_days,
         confirm_bars          = confirm_bars,
         min_hold_minutes      = min_hold_minutes,
+        vol_lookback_days     = vol_lookback_days,
+        vol_bars_to_track     = vol_bars_to_track,
         use_real_pricing      = False,
     )
 
@@ -311,5 +315,7 @@ if __name__ == "__main__":
             min_bootstrap_days    = Config.ORB_MIN_BOOTSTRAP_DAYS,
             confirm_bars          = Config.ORB_CONFIRM_BARS,
             min_hold_minutes      = Config.ORB_MIN_HOLD_MINUTES,
+            vol_lookback_days     = Config.VOL_LOOKBACK_DAYS,
+            vol_bars_to_track     = Config.VOL_BARS_TO_TRACK,
             label                 = "single_run",
         )
