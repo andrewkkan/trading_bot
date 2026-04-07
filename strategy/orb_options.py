@@ -115,6 +115,8 @@ class ORBOptionsStrategy(ORBBase):
         min_bootstrap_days:    int   = 5,
         confirm_bars:          int   = 3,
         min_hold_minutes:      int   = 30,
+        gap_lookback_days:     int   = 50,
+        gap_none_threshold:    float = 0.001,
         use_real_pricing:      bool  = False,
         spread_pct:            float = 0.05,
     ):
@@ -137,6 +139,8 @@ class ORBOptionsStrategy(ORBBase):
             min_bootstrap_days    = min_bootstrap_days,
             confirm_bars          = confirm_bars,
             min_hold_minutes      = min_hold_minutes,
+            gap_lookback_days     = gap_lookback_days,
+            gap_none_threshold    = gap_none_threshold,
         )
 
     # -----------------------------------------------------------------------

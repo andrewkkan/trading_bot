@@ -12,6 +12,7 @@ What the base class owns (final — do not override):
   - Market hours gate
   - Daily loss limit
   - Opening range construction (via RangeBuilder — adaptive, validated)
+  - Gap detection per day (via GapDetector — stored on state, annotation only)
   - Breakout detection   (both LONG and SHORT, N-bar confirmation, entry cutoff)
   - Position management  (stop/target on underlying price)
   - EOD flatten
@@ -40,6 +41,7 @@ from datetime import time, date
 from typing import Any
 
 from strategy.range_builder import RangeBuilder, RangeResult
+from strategy.gap_detector import GapDetector, GapSignal
 from strategy.utils import ns_to_et, MARKET_OPEN, MARKET_CLOSE
 from utils.logger import get_logger
 
@@ -62,6 +64,7 @@ class ORBDayState:
     range_set:      bool  = False
     range_width:    float = 0.0
     range_skipped:  bool  = False   # True when day was skipped (too narrow)
+    gap_signal:     object = None    # GapSignal — set on first bar at market open
     # Signal / position
     trade_fired:         bool  = False
     direction:           str   = ""      # "LONG" or "SHORT"
@@ -94,6 +97,8 @@ class ORBBase(ABC):
         min_bootstrap_days    : samples needed before validation applied (default 5)
         confirm_bars          : consecutive closes required to confirm breakout (default 3)
         min_hold_minutes      : minimum minutes between entry and EOD close (default 30)
+        gap_lookback_days     : rolling avg lookback for gap history (default 50)
+        gap_none_threshold    : abs(gap_pct) below this = NONE direction (default 0.001)
     """
 
     def __init__(
@@ -108,6 +113,8 @@ class ORBBase(ABC):
         min_bootstrap_days:    int   = 5,
         confirm_bars:          int   = 3,
         min_hold_minutes:      int   = 30,
+        gap_lookback_days:     int   = 50,
+        gap_none_threshold:    float = 0.001,
     ):
         self.symbol                = symbol
         self.opening_range_minutes = opening_range_minutes
@@ -122,6 +129,12 @@ class ORBBase(ABC):
             min_range_pct         = min_range_pct,
             rolling_lookback_days = rolling_lookback_days,
             min_bootstrap_days    = min_bootstrap_days,
+        )
+
+        self._gap_detector = GapDetector(
+            rolling_lookback_days = gap_lookback_days,
+            min_bootstrap_days    = min_bootstrap_days,
+            none_threshold        = gap_none_threshold,
         )
 
         self._current_date = None
@@ -187,6 +200,7 @@ class ORBBase(ABC):
         Process one ohlcv-1s record. Returns an order or None.
         All ORB variants share this exact dispatch — do not override.
         """
+        bar_open  = record.open  / 1e9
         bar_high  = record.high  / 1e9
         bar_low   = record.low   / 1e9
         bar_close = record.close / 1e9
@@ -197,6 +211,19 @@ class ORBBase(ABC):
 
         if bar_date != self._current_date:
             self._reset_day(bar_date)
+
+        # Feed gap detector on every bar — it manages its own day boundary
+        # and computes the signal once on the first bar at market open
+        gap_signal = self._gap_detector.on_bar(
+            bar_date  = bar_date,
+            bar_time  = bar_time,
+            bar_open  = bar_open,
+            bar_close = bar_close,
+            bar_high  = bar_high,
+            bar_low   = bar_low,
+        )
+        if gap_signal is not None and gap_signal.is_new:
+            self.state.gap_signal = gap_signal
 
         if bar_time < MARKET_OPEN or bar_time >= MARKET_CLOSE:
             return None

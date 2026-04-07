@@ -40,6 +40,10 @@ class Config:
     ORB_CONFIRM_BARS          = 3       # consecutive closes needed to confirm breakout
     ORB_MIN_HOLD_MINUTES      = 30      # min minutes between entry and EOD close
 
+    # --- Gap detection ---
+    GAP_LOOKBACK_DAYS         = 50      # rolling avg lookback for gap history
+    GAP_NONE_THRESHOLD        = 0.001   # abs(gap_pct) below this = direction NONE (0.1%)
+
     # --- ORB Options ---
     ORB_TARGET_DTE        = 1       # 0=same day, 1=next day, 7=weekly
     ORB_STRIKE_OFFSET_PCT = 0.0     # 0.0=ATM, 0.005=0.5% OTM
