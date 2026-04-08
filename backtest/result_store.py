@@ -1,7 +1,8 @@
 """
 backtest/result_store.py — SQLite result store for backtest runs.
 
-Creates and manages three tables:
+Creates and manages four tables:
+  runs           — one row per backtest run with all config params
   daily_summary  — one row per trading day (range, gap, trade outcome)
   trades         — one row per completed round-trip trade
   events         — one row per state transition (full intraday audit log)
@@ -52,6 +53,38 @@ logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 
 _SCHEMA = """
+CREATE TABLE IF NOT EXISTS runs (
+    id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+    label                  TEXT,
+    created_at             TEXT,
+    symbol                 TEXT,
+    -- Strategy params
+    opening_range_minutes  INTEGER,
+    rr_ratio               REAL,
+    breakout_bars          INTEGER,
+    retest_bars            INTEGER,
+    reconfirm_bars         INTEGER,
+    min_hold_minutes       INTEGER,
+    slippage               REAL,
+    -- Range validation
+    max_window_multiplier  INTEGER,
+    min_range_pct          REAL,
+    rolling_lookback_days  INTEGER,
+    min_bootstrap_days     INTEGER,
+    -- Gap detection
+    gap_lookback_days      INTEGER,
+    gap_none_threshold     REAL,
+    -- Volume evaluation
+    vol_lookback_days      INTEGER,
+    vol_bars_to_track      INTEGER,
+    -- Risk
+    max_daily_loss         REAL,
+    -- Options-specific (NULL for equity runs)
+    target_dte             INTEGER,
+    strike_offset_pct      REAL,
+    max_risk_per_trade     REAL
+);
+
 CREATE TABLE IF NOT EXISTS daily_summary (
     date              TEXT PRIMARY KEY,
     symbol            TEXT,
@@ -167,6 +200,56 @@ class ResultStore:
         self._conn.executescript(_SCHEMA)
         self._conn.commit()
         logger.info(f"ResultStore opened: {self.db_path}")
+
+    def log_run(self, label: str, params: dict) -> None:
+        """
+        Record the config for this backtest run.
+        Call once after open(), before the bar loop starts.
+        params should be the full kwargs passed to run_backtest().
+        """
+        if not self._conn:
+            return
+        from datetime import datetime
+        self._conn.execute(
+            """INSERT INTO runs (
+                label, created_at, symbol,
+                opening_range_minutes, rr_ratio,
+                breakout_bars, retest_bars, reconfirm_bars,
+                min_hold_minutes, slippage,
+                max_window_multiplier, min_range_pct,
+                rolling_lookback_days, min_bootstrap_days,
+                gap_lookback_days, gap_none_threshold,
+                vol_lookback_days, vol_bars_to_track,
+                max_daily_loss, target_dte,
+                strike_offset_pct, max_risk_per_trade
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                label,
+                datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+                self.symbol,
+                params.get("opening_range_minutes"),
+                params.get("rr_ratio"),
+                params.get("breakout_bars"),
+                params.get("retest_bars"),
+                params.get("reconfirm_bars"),
+                params.get("min_hold_minutes"),
+                params.get("slippage"),
+                params.get("max_window_multiplier"),
+                params.get("min_range_pct"),
+                params.get("rolling_lookback_days"),
+                params.get("min_bootstrap_days"),
+                params.get("gap_lookback_days"),
+                params.get("gap_none_threshold"),
+                params.get("vol_lookback_days"),
+                params.get("vol_bars_to_track"),
+                params.get("max_daily_loss"),
+                params.get("target_dte"),
+                params.get("strike_offset_pct"),
+                params.get("max_risk_per_trade"),
+            ),
+        )
+        self._conn.commit()
+        logger.info(f"Run config logged: [{label}]")
 
     def close(self) -> None:
         """Flush the last day's summary and close the connection."""

@@ -81,6 +81,24 @@ def run_backtest(
         db_path = os.path.join(RESULTS_DIR, f"{safe}.db")
     result_store = ResultStore(db_path=db_path, symbol=symbol)
     result_store.open()
+    result_store.log_run(label, {
+        "opening_range_minutes": opening_range_minutes,
+        "rr_ratio":              rr_ratio,
+        "breakout_bars":         breakout_bars,
+        "retest_bars":           retest_bars,
+        "reconfirm_bars":        reconfirm_bars,
+        "min_hold_minutes":      min_hold_minutes,
+        "slippage":              slippage,
+        "max_window_multiplier": max_window_multiplier,
+        "min_range_pct":         min_range_pct,
+        "rolling_lookback_days": rolling_lookback_days,
+        "min_bootstrap_days":    min_bootstrap_days,
+        "gap_lookback_days":     gap_lookback_days,
+        "gap_none_threshold":    gap_none_threshold,
+        "vol_lookback_days":     vol_lookback_days,
+        "vol_bars_to_track":     vol_bars_to_track,
+        "max_daily_loss":        max_daily_loss,
+    })
 
     strategy = ORBStrategy(
         symbol                = symbol,
