@@ -21,23 +21,27 @@ trading_bot/
 │   ├── orb_base.py                  # Abstract base — all price logic (edit here first)
 │   ├── orb.py                       # Equity execution + TradeRecord
 │   ├── orb_options.py               # Options execution + TradeRecord
-│   ├── retest_engine.py             # Breakout → retest → entry state machine
-│   ├── range_builder.py             # Adaptive opening range with rolling avg validation
-│   ├── gap_detector.py              # Overnight gap detection and classification
+│   ├── retest_engine.py             # Breakout → retest → entry state machine (both directions)
+│   ├── range_builder.py             # Adaptive opening range with rolling avg width validation
+│   ├── gap_detector.py              # Overnight gap vs prior close + prior high/low
 │   ├── volume_evaluator.py          # Volume evaluation at breakout confirmation
-│   ├── option_pricing.py            # Black-Scholes pricer + greeks
-│   └── utils.py                     # Shared time/date utilities
+│   ├── option_pricing.py            # Black-Scholes pricer + greeks (B-S placeholder)
+│   └── utils.py                     # Shared time/date utilities (ET conversion etc.)
 │
 ├── broker/
 │   ├── etrade.py                    # E*TRADE OAuth + equity + option order placement
 │   └── option_examples.py           # Runnable option order examples
 │
 ├── backtest/
+│   ├── result_store.py              # SQLite result store (events, trades, daily_summary)
 │   ├── run_orb_equity.py            # Equity backtest runner + parameter sweep
 │   └── run_orb_options.py           # Options backtest runner + parameter sweep
 │
 ├── data/
 │   └── feed.py                      # Databento live stream wrapper
+│
+├── historical_data/                 # Local DBN files (git-ignored)
+│   └── QQQ_ohlcv_1s.dbn.zst        # Downloaded from Databento
 │
 └── utils/
     └── logger.py                    # Shared logging
@@ -150,8 +154,11 @@ avg DTE, avg entry delta, and avg entry IV.
 
 ### Querying results
 
-The SQLite database has three tables:
+The SQLite database has four tables:
 
+- **`runs`** — one row per backtest run recording every config parameter
+  (rr_ratio, breakout_bars, slippage, etc.) and a UTC timestamp. Makes
+  every `.db` file fully self-describing.
 - **`events`** — every intraday state transition with a `detail` JSON field.
   Event types: RANGE_SET, RANGE_SKIPPED, GAP_SIGNAL, BREAKOUT_LONG/SHORT,
   RETEST_LONG/SHORT, WINDOW_EXPAND, ENTRY_LONG/SHORT, VOLUME_SIGNAL,
@@ -168,6 +175,37 @@ import sqlite3
 import pandas as pd
 
 conn = sqlite3.connect("backtest/results/orb_equity.db")
+
+# What params produced these results?
+pd.read_sql("SELECT * FROM runs", conn)
+
+# --- Cross-run sweep analysis ---
+# Summarise every .db file in results/ into a ranked comparison table
+import glob
+
+def summarise_run(path):
+    c = sqlite3.connect(path)
+    r = pd.read_sql("SELECT * FROM runs LIMIT 1", c)
+    t = pd.read_sql("SELECT pnl FROM trades", c)
+    if r.empty or t.empty:
+        return None
+    r = r.iloc[0]
+    return {
+        "label":         r["label"],
+        "rr_ratio":      r["rr_ratio"],
+        "breakout_bars": r["breakout_bars"],
+        "retest_bars":   r["retest_bars"],
+        "slippage":      r["slippage"],
+        "trades":        len(t),
+        "win_rate":      round((t.pnl > 0).mean(), 3),
+        "total_pnl":     round(t.pnl.sum(), 2),
+        "avg_pnl":       round(t.pnl.mean(), 2),
+    }
+
+sweep = pd.DataFrame(filter(None, [
+    summarise_run(p) for p in glob.glob("backtest/results/*.db")
+])).sort_values("total_pnl", ascending=False)
+print(sweep.to_string(index=False))
 
 # Replay one day — every event in order
 events = pd.read_sql(

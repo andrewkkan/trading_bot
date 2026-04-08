@@ -69,7 +69,7 @@ def run_backtest(
         f"  ORB window={opening_range_minutes}m  RR={rr_ratio}x  "
         f"DTE={target_dte}  offset={strike_offset_pct:.1%}  "
         f"risk/trade=${max_risk_per_trade:.0f}  "
-        f"confirm={confirm_bars} bars  min_hold={min_hold_minutes}m"
+        f"confirm={reconfirm_bars} bars  min_hold={min_hold_minutes}m"
     )
     logger.info("=" * 65)
 
@@ -78,6 +78,27 @@ def run_backtest(
         db_path = os.path.join(RESULTS_DIR, f"{safe}.db")
     result_store = ResultStore(db_path=db_path, symbol=Config.SYMBOLS[0])
     result_store.open()
+    result_store.log_run(label, {
+        "opening_range_minutes": opening_range_minutes,
+        "rr_ratio":              rr_ratio,
+        "breakout_bars":         breakout_bars,
+        "retest_bars":           retest_bars,
+        "reconfirm_bars":        reconfirm_bars,
+        "min_hold_minutes":      min_hold_minutes,
+        "slippage":              slippage,
+        "max_window_multiplier": max_window_multiplier,
+        "min_range_pct":         min_range_pct,
+        "rolling_lookback_days": rolling_lookback_days,
+        "min_bootstrap_days":    min_bootstrap_days,
+        "gap_lookback_days":     gap_lookback_days,
+        "gap_none_threshold":    gap_none_threshold,
+        "vol_lookback_days":     vol_lookback_days,
+        "vol_bars_to_track":     vol_bars_to_track,
+        "max_daily_loss":        max_daily_loss,
+        "target_dte":            target_dte,
+        "strike_offset_pct":     strike_offset_pct,
+        "max_risk_per_trade":    max_risk_per_trade,
+    })
 
     strategy = ORBOptionsStrategy(
         symbol                = Config.SYMBOLS[0],

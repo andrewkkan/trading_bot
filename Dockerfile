@@ -10,4 +10,4 @@ RUN pip install ipython
 # Copy source
 COPY . .
 
-CMD ["python", "main.py"]
+CMD ["tail", "-f", "/dev/null"]
