@@ -147,6 +147,64 @@ exit reason breakdown (stops/targets/EOD), and gap context breakdown.
 Options backtest summary includes the above plus: total premium paid,
 avg DTE, avg entry delta, and avg entry IV.
 
+### Running with custom dates or parameters
+
+The `python main.py backtest` command uses `config.py` defaults over the
+full dataset. For custom date ranges, hand-picked days, or parameter
+overrides, call `run_backtest()` directly from an ipython shell or script:
+
+```python
+from datetime import date
+from backtest.run_orb_equity import run_backtest   # equity
+# from backtest.run_orb_options import run_backtest  # options
+
+# Hand-picked days — validate against trades you made manually
+run_backtest(
+    dates = [
+        date(2024, 3, 14),
+        date(2024, 3, 19),
+        date(2024, 4, 2),
+    ],
+    label = "manual_validation",
+)
+
+# Date window
+run_backtest(
+    start_date = date(2024, 1, 2),
+    end_date   = date(2024, 3, 31),
+    label      = "Q1_2024",
+)
+
+# Override any strategy parameter inline
+run_backtest(
+    start_date    = date(2024, 1, 2),
+    end_date      = date(2024, 12, 31),
+    rr_ratio      = 3.0,
+    breakout_bars = 5,
+    retest_bars   = 3,
+    slippage      = 0.02,
+    label         = "2024_rr3_tight_entry",
+)
+```
+
+Results always land in `backtest/results/<label>_trades.csv` and
+`backtest/results/<label>_equity.csv` regardless of how you call it.
+
+### Slippage model
+
+A fixed per-share slippage (`SLIPPAGE = 0.01` in `config.py`) is applied
+to every fill:
+
+```
+LONG  entry : fill = bar_close + slippage
+SHORT entry : fill = bar_close - slippage
+LONG  exit  : fill = exit_level - slippage
+SHORT exit  : fill = exit_level + slippage
+```
+
+Adjust `SLIPPAGE` in `config.py` or pass `slippage=` directly to
+`run_backtest()` to model different market conditions.
+
 ### Parameter sweep
 
 Each sweep runs 8 preset parameter combinations and prints a ranked
