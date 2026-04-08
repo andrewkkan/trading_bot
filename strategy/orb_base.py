@@ -34,6 +34,26 @@ Stop  : opposite side of range      (LONG=range_low,  SHORT=range_high)
 Target: entry ± rr_ratio × width   (LONG=entry+dist, SHORT=entry-dist)
 
 Stops checked with bar_low (long) / bar_high (short) to catch gaps.
+
+OHLCV bar sequence assumption
+==============================
+Within a 1-second bar we don't know the order of high and low. We infer:
+  close_position = (bar_close - bar_low) / (bar_high - bar_low)
+  >= 0.5 → close near high → high came first
+  <  0.5 → close near low  → low came first
+
+For LONG: if high first, check target before stop (and vice versa).
+For SHORT: if low first, check target before stop (and vice versa).
+This eliminates the ambiguity of a bar hitting both stop and target.
+
+Slippage model
+==============
+A fixed per-share slippage is applied to every fill:
+  LONG  entry : fill = bar_close + slippage
+  SHORT entry : fill = bar_close - slippage
+  LONG  exit  : fill = exit_price - slippage
+  SHORT exit  : fill = exit_price + slippage
+EOD flattens use bar_close with slippage applied.
 """
 
 from abc import ABC, abstractmethod
@@ -104,6 +124,7 @@ class ORBBase(ABC):
         gap_none_threshold    : abs(gap_pct) below this = NONE direction (default 0.001)
         vol_lookback_days     : rolling avg lookback for volume history (default 50)
         vol_bars_to_track     : sliding window of recent bar volumes (default 20)
+        slippage              : fixed per-share slippage per fill (default 0.01)
     """
 
     def __init__(
@@ -124,6 +145,7 @@ class ORBBase(ABC):
         gap_none_threshold:    float = 0.001,
         vol_lookback_days:     int   = 50,
         vol_bars_to_track:     int   = 20,
+        slippage:              float = 0.01,
     ):
         self.symbol                = symbol
         self.opening_range_minutes = opening_range_minutes
@@ -133,6 +155,7 @@ class ORBBase(ABC):
         self.retest_bars           = retest_bars
         self.reconfirm_bars        = reconfirm_bars
         self.min_hold_minutes      = min_hold_minutes
+        self.slippage              = slippage
 
         self._range_builder = RangeBuilder(
             opening_range_minutes = opening_range_minutes,
@@ -358,24 +381,29 @@ class ORBBase(ABC):
         for result in events:
             if result.event == "ENTRY":
                 direction = result.direction
-                self.state.trade_fired  = True
-                self.state.direction    = direction
-                self.state.position     = 1
-                self.state.entry_price  = bar_close
+                self.state.trade_fired = True
+                self.state.direction   = direction
+                self.state.position    = 1
 
+                # Apply slippage to entry fill price
                 if direction == "LONG":
+                    fill_price = bar_close + self.slippage
+                    self.state.entry_price  = fill_price
                     self.state.stop_price   = self.state.range_low
                     self.state.target_price = (
-                        bar_close + self.rr_ratio * self.state.range_width
+                        fill_price + self.rr_ratio * self.state.range_width
                     )
                 else:
+                    fill_price = bar_close - self.slippage
+                    self.state.entry_price  = fill_price
                     self.state.stop_price   = self.state.range_high
                     self.state.target_price = (
-                        bar_close - self.rr_ratio * self.state.range_width
+                        fill_price - self.rr_ratio * self.state.range_width
                     )
 
                 logger.info(
-                    f"  ENTRY {direction} @ {bar_close:.4f} | "
+                    f"  ENTRY {direction} @ {fill_price:.4f} "
+                    f"(close={bar_close:.4f} slip={self.slippage:.4f}) | "
                     f"stop={self.state.stop_price:.4f} | "
                     f"target={self.state.target_price:.4f}"
                 )
@@ -398,27 +426,76 @@ class ORBBase(ABC):
         bar_date:  date,
         bar_time:  time,
     ) -> Any:
-        """Check stop and target against underlying price."""
+        """
+        Check stop and target against underlying price.
+
+        Bar sequence assumption: infer whether high or low came first
+        within the bar based on where close landed.
+          close_position >= 0.5 → close near high → high came first
+          close_position <  0.5 → close near low  → low came first
+
+        For LONG:  high first → check target before stop
+        For SHORT: low first  → check target before stop
+        """
         direction = self.state.direction
+        bar_range = bar_high - bar_low
+
+        # Infer intrabar sequence
+        if bar_range > 0:
+            close_pos  = (bar_close - bar_low) / bar_range
+            high_first = close_pos >= 0.5
+        else:
+            high_first = True   # flat bar — order doesn't matter
 
         if direction == "LONG":
-            if bar_low <= self.state.stop_price:
-                return self._trigger_exit(
-                    "Stop loss", self.state.stop_price, bar_date, bar_time
-                )
-            if bar_high >= self.state.target_price:
-                return self._trigger_exit(
-                    "Take profit", self.state.target_price, bar_date, bar_time
-                )
+            stop_hit   = bar_low  <= self.state.stop_price
+            target_hit = bar_high >= self.state.target_price
+
+            if high_first:
+                # target checked first
+                if target_hit:
+                    return self._trigger_exit(
+                        "Take profit", self.state.target_price, bar_date, bar_time
+                    )
+                if stop_hit:
+                    return self._trigger_exit(
+                        "Stop loss", self.state.stop_price, bar_date, bar_time
+                    )
+            else:
+                # stop checked first
+                if stop_hit:
+                    return self._trigger_exit(
+                        "Stop loss", self.state.stop_price, bar_date, bar_time
+                    )
+                if target_hit:
+                    return self._trigger_exit(
+                        "Take profit", self.state.target_price, bar_date, bar_time
+                    )
+
         else:  # SHORT
-            if bar_high >= self.state.stop_price:
-                return self._trigger_exit(
-                    "Stop loss", self.state.stop_price, bar_date, bar_time
-                )
-            if bar_low <= self.state.target_price:
-                return self._trigger_exit(
-                    "Take profit", self.state.target_price, bar_date, bar_time
-                )
+            stop_hit   = bar_high >= self.state.stop_price
+            target_hit = bar_low  <= self.state.target_price
+
+            if not high_first:
+                # low came first — check target before stop
+                if target_hit:
+                    return self._trigger_exit(
+                        "Take profit", self.state.target_price, bar_date, bar_time
+                    )
+                if stop_hit:
+                    return self._trigger_exit(
+                        "Stop loss", self.state.stop_price, bar_date, bar_time
+                    )
+            else:
+                # high came first — check stop before target
+                if stop_hit:
+                    return self._trigger_exit(
+                        "Stop loss", self.state.stop_price, bar_date, bar_time
+                    )
+                if target_hit:
+                    return self._trigger_exit(
+                        "Take profit", self.state.target_price, bar_date, bar_time
+                    )
 
         return None
 
@@ -431,18 +508,23 @@ class ORBBase(ABC):
         self, reason: str, exit_price: float,
         bar_date: date, bar_time: time,
     ) -> Any:
+        # Apply slippage to exit fill — adverse to the position
         if self.state.direction == "LONG":
-            pnl_per_unit = exit_price - self.state.entry_price
+            fill_price   = exit_price - self.slippage
+            pnl_per_unit = fill_price - self.state.entry_price
         else:
-            pnl_per_unit = self.state.entry_price - exit_price
+            fill_price   = exit_price + self.slippage
+            pnl_per_unit = self.state.entry_price - fill_price
 
         self.state.daily_pnl += pnl_per_unit * abs(self.state.position)
 
         logger.info(
-            f"  EXIT [{reason}] {self.state.direction} @ {exit_price:.4f} | "
+            f"  EXIT [{reason}] {self.state.direction} @ {fill_price:.4f} "
+            f"(level={exit_price:.4f} slip={self.slippage:.4f}) | "
             f"entry={self.state.entry_price:.4f} | "
             f"daily P&L=${self.state.daily_pnl:+.2f}"
         )
+        exit_price = fill_price   # pass slippage-adjusted price to subclass
 
         order = self._on_exit(reason, exit_price, bar_date, bar_time)
         self.state.position = 0

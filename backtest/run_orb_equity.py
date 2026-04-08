@@ -14,7 +14,7 @@ Output:
 import csv
 import os
 import math
-from datetime import date
+from datetime import date, datetime
 from collections import defaultdict
 
 import databento as db
@@ -50,6 +50,10 @@ def run_backtest(
     gap_none_threshold:    float = 0.001,
     vol_lookback_days:     int   = 50,
     vol_bars_to_track:     int   = 20,
+    slippage:              float = 0.01,
+    start_date:            date  | None = None,
+    end_date:              date  | None = None,
+    dates:                 list  | None = None,
     label:                 str   = "default",
 ) -> dict:
     """
@@ -87,16 +91,33 @@ def run_backtest(
         gap_none_threshold    = gap_none_threshold,
         vol_lookback_days     = vol_lookback_days,
         vol_bars_to_track     = vol_bars_to_track,
+        slippage              = slippage,
     )
+
+    # Normalise date filter inputs
+    dates_set = set(dates) if dates else None
 
     store = db.DBNStore.from_file(Config.HISTORICAL_DATA_PATH)
 
-    bars_processed = 0
+    bars_processed = bars_skipped = 0
     for record in store:
+        bar_date = _record_date(record)
+
+        # Date range filter
+        if start_date and bar_date < start_date:
+            bars_skipped += 1
+            continue
+        if end_date and bar_date > end_date:
+            bars_skipped += 1
+            continue
+        if dates_set and bar_date not in dates_set:
+            bars_skipped += 1
+            continue
+
         bars_processed += 1
         strategy.on_tick(record)
 
-    logger.info(f"Bars processed: {bars_processed:,}")
+    logger.info(f"Bars processed: {bars_processed:,}  skipped: {bars_skipped:,}")
 
     summary = _compute_summary(strategy.trades, label)
     _print_summary(summary)
@@ -344,6 +365,12 @@ def sweep_parameters():
 # Entry point
 # ---------------------------------------------------------------------------
 
+def _record_date(record) -> date:
+    """Extract the ET date from a Databento ohlcv record."""
+    from strategy.utils import ns_to_et
+    return ns_to_et(record.ts_event).date()
+
+
 if __name__ == "__main__":
     import sys
 
@@ -367,5 +394,6 @@ if __name__ == "__main__":
             gap_none_threshold    = Config.GAP_NONE_THRESHOLD,
             vol_lookback_days     = Config.VOL_LOOKBACK_DAYS,
             vol_bars_to_track     = Config.VOL_BARS_TO_TRACK,
+            slippage              = Config.SLIPPAGE,
             label                 = "single_run",
         )

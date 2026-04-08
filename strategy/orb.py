@@ -82,6 +82,7 @@ class ORBStrategy(ORBBase):
         gap_none_threshold:    float = 0.001,
         vol_lookback_days:     int   = 50,
         vol_bars_to_track:     int   = 20,
+        slippage:              float = 0.01,
     ):
         self.quantity = quantity
         self.trades: list[TradeRecord] = []
@@ -102,6 +103,7 @@ class ORBStrategy(ORBBase):
             gap_none_threshold    = gap_none_threshold,
             vol_lookback_days     = vol_lookback_days,
             vol_bars_to_track     = vol_bars_to_track,
+            slippage              = slippage,
         )
 
     # -----------------------------------------------------------------------

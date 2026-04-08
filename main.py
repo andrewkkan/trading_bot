@@ -46,6 +46,7 @@ def run_equity_backtest():
         gap_none_threshold    = Config.GAP_NONE_THRESHOLD,
         vol_lookback_days     = Config.VOL_LOOKBACK_DAYS,
         vol_bars_to_track     = Config.VOL_BARS_TO_TRACK,
+        slippage              = Config.SLIPPAGE,
         label                 = "orb_equity",
     )
 
@@ -73,6 +74,7 @@ def run_options_backtest():
         min_hold_minutes      = Config.ORB_MIN_HOLD_MINUTES,
         vol_lookback_days     = Config.VOL_LOOKBACK_DAYS,
         vol_bars_to_track     = Config.VOL_BARS_TO_TRACK,
+        slippage              = Config.SLIPPAGE,
         label                 = "orb_options",
     )
 
@@ -115,6 +117,7 @@ async def run_live(paper: bool = False):
         gap_none_threshold    = Config.GAP_NONE_THRESHOLD,
         vol_lookback_days     = Config.VOL_LOOKBACK_DAYS,
         vol_bars_to_track     = Config.VOL_BARS_TO_TRACK,
+        slippage              = Config.SLIPPAGE,
         use_real_pricing      = False,
     )
 

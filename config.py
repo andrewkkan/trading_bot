@@ -50,6 +50,9 @@ class Config:
     VOL_LOOKBACK_DAYS         = 50      # rolling avg lookback for volume history
     VOL_BARS_TO_TRACK         = 20      # sliding window of recent bar volumes
 
+    # --- Slippage ---
+    SLIPPAGE                  = 0.01    # fixed per-share slippage per fill ($0.01)
+
     # --- ORB Options ---
     ORB_TARGET_DTE        = 1       # 0=same day, 1=next day, 7=weekly
     ORB_STRIKE_OFFSET_PCT = 0.0     # 0.0=ATM, 0.005=0.5% OTM
