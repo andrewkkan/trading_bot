@@ -37,7 +37,9 @@ class Config:
     ORB_MIN_RANGE_PCT         = 0.5     # range must be >= 50% of rolling avg
     ORB_ROLLING_LOOKBACK_DAYS = 50      # rolling avg window (days)
     ORB_MIN_BOOTSTRAP_DAYS    = 5       # samples before validation kicks in
-    ORB_CONFIRM_BARS          = 3       # consecutive closes needed to confirm breakout
+    ORB_BREAKOUT_BARS         = 3       # consecutive closes outside range to confirm breakout
+    ORB_RETEST_BARS           = 3       # consecutive closes inside window to credit retest
+    ORB_RECONFIRM_BARS        = 3       # consecutive closes outside window after retest to enter
     ORB_MIN_HOLD_MINUTES      = 30      # min minutes between entry and EOD close
 
     # --- Gap detection ---

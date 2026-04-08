@@ -45,7 +45,9 @@ def run_backtest(
     min_range_pct:         float = 0.5,
     rolling_lookback_days: int   = 50,
     min_bootstrap_days:    int   = 5,
-    confirm_bars:          int   = 3,
+    breakout_bars:         int   = 3,
+    retest_bars:           int   = 3,
+    reconfirm_bars:        int   = 3,
     min_hold_minutes:      int   = 30,
     vol_lookback_days:     int   = 50,
     vol_bars_to_track:     int   = 20,
@@ -77,7 +79,9 @@ def run_backtest(
         min_range_pct         = min_range_pct,
         rolling_lookback_days = rolling_lookback_days,
         min_bootstrap_days    = min_bootstrap_days,
-        confirm_bars          = confirm_bars,
+        breakout_bars         = breakout_bars,
+        retest_bars           = retest_bars,
+        reconfirm_bars        = reconfirm_bars,
         min_hold_minutes      = min_hold_minutes,
         vol_lookback_days     = vol_lookback_days,
         vol_bars_to_track     = vol_bars_to_track,
@@ -249,24 +253,26 @@ def sweep_parameters():
     Edit the grids below to suit your exploration.
     """
     configs = [
-        # (orb_min, rr_ratio, dte, confirm_bars, min_hold, label)
-        (5,  2.0, 0, 3, 30, "ORB5m_0DTE_RR2_conf3"),
-        (5,  2.0, 1, 3, 30, "ORB5m_1DTE_RR2_conf3"),
-        (15, 2.0, 0, 3, 30, "ORB15m_0DTE_RR2_conf3"),
-        (15, 2.0, 1, 3, 30, "ORB15m_1DTE_RR2_conf3"),
-        (15, 3.0, 1, 3, 30, "ORB15m_1DTE_RR3_conf3"),
-        (15, 2.0, 1, 5, 30, "ORB15m_1DTE_RR2_conf5"),
-        (30, 2.0, 1, 3, 30, "ORB30m_1DTE_RR2_conf3"),
-        (30, 2.0, 7, 3, 30, "ORB30m_7DTE_RR2_conf3"),
+        # (orb_min, rr, dte, breakout, retest, reconfirm, hold, label)
+        (5,  2.0, 0, 3, 3, 3, 30, "ORB5m_0DTE_RR2_b3r3"),
+        (5,  2.0, 1, 3, 3, 3, 30, "ORB5m_1DTE_RR2_b3r3"),
+        (15, 2.0, 0, 3, 3, 3, 30, "ORB15m_0DTE_RR2_b3r3"),
+        (15, 2.0, 1, 3, 3, 3, 30, "ORB15m_1DTE_RR2_b3r3"),
+        (15, 3.0, 1, 3, 3, 3, 30, "ORB15m_1DTE_RR3_b3r3"),
+        (15, 2.0, 1, 5, 3, 3, 30, "ORB15m_1DTE_RR2_b5r3"),
+        (30, 2.0, 1, 3, 3, 3, 30, "ORB30m_1DTE_RR2_b3r3"),
+        (30, 2.0, 7, 3, 3, 3, 30, "ORB30m_7DTE_RR2_b3r3"),
     ]
 
     results = []
-    for (orb_min, rr, dte, confirm, hold, lbl) in configs:
+    for (orb_min, rr, dte, bo, rt, rc, hold, lbl) in configs:
         summary = run_backtest(
             opening_range_minutes = orb_min,
             rr_ratio              = rr,
             target_dte            = dte,
-            confirm_bars          = confirm,
+            breakout_bars         = bo,
+            retest_bars           = rt,
+            reconfirm_bars        = rc,
             min_hold_minutes      = hold,
             label                 = lbl,
         )
@@ -313,7 +319,9 @@ if __name__ == "__main__":
             min_range_pct         = Config.ORB_MIN_RANGE_PCT,
             rolling_lookback_days = Config.ORB_ROLLING_LOOKBACK_DAYS,
             min_bootstrap_days    = Config.ORB_MIN_BOOTSTRAP_DAYS,
-            confirm_bars          = Config.ORB_CONFIRM_BARS,
+            breakout_bars         = Config.ORB_BREAKOUT_BARS,
+    retest_bars           = Config.ORB_RETEST_BARS,
+    reconfirm_bars        = Config.ORB_RECONFIRM_BARS,
             min_hold_minutes      = Config.ORB_MIN_HOLD_MINUTES,
             vol_lookback_days     = Config.VOL_LOOKBACK_DAYS,
             vol_bars_to_track     = Config.VOL_BARS_TO_TRACK,

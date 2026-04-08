@@ -26,6 +26,26 @@ class Order:
 
 
 @dataclass
+class TradeRecord:
+    """One completed round-trip trade — entry to exit."""
+    date:            date
+    direction:       str     # "LONG" or "SHORT"
+    entry_time:      str
+    exit_time:       str
+    entry_price:     float   # underlying price at entry
+    exit_price:      float   # underlying price at exit
+    quantity:        int     # shares
+    pnl:             float   # realised P&L in dollars
+    exit_reason:     str     # "Stop loss" | "Take profit" | "EOD flatten"
+    range_high:      float
+    range_low:       float
+    range_width:     float
+    gap_direction:   str     # from GapSignal: "UP" | "DOWN" | "NONE" | "N/A"
+    gap_pct:         float
+    vol_rel:         float   # confirm_rel_vol from VolumeSignal (0.0 if no history)
+
+
+@dataclass
 class EquityDayState(ORBDayState):
     """Extends ORBDayState with equity-specific execution fields."""
     quantity: int = 0           # shares filled at entry
@@ -54,7 +74,9 @@ class ORBStrategy(ORBBase):
         min_range_pct:         float = 0.5,
         rolling_lookback_days: int   = 50,
         min_bootstrap_days:    int   = 5,
-        confirm_bars:          int   = 3,
+        breakout_bars:         int   = 3,
+        retest_bars:           int   = 3,
+        reconfirm_bars:        int   = 3,
         min_hold_minutes:      int   = 30,
         gap_lookback_days:     int   = 50,
         gap_none_threshold:    float = 0.001,
@@ -62,6 +84,7 @@ class ORBStrategy(ORBBase):
         vol_bars_to_track:     int   = 20,
     ):
         self.quantity = quantity
+        self.trades: list[TradeRecord] = []
         super().__init__(
             symbol                = symbol,
             opening_range_minutes = opening_range_minutes,
@@ -71,7 +94,9 @@ class ORBStrategy(ORBBase):
             min_range_pct         = min_range_pct,
             rolling_lookback_days = rolling_lookback_days,
             min_bootstrap_days    = min_bootstrap_days,
-            confirm_bars          = confirm_bars,
+            breakout_bars         = breakout_bars,
+            retest_bars           = retest_bars,
+            reconfirm_bars        = reconfirm_bars,
             min_hold_minutes      = min_hold_minutes,
             gap_lookback_days     = gap_lookback_days,
             gap_none_threshold    = gap_none_threshold,
@@ -107,9 +132,10 @@ class ORBStrategy(ORBBase):
         self, direction: str, bar_close: float,
         bar_date: date, bar_time: time,
     ) -> Order:
-        # Record the actual share quantity on state so _trigger_exit P&L is correct
-        self.state.position = self.quantity
-        self.state.quantity = self.quantity
+        self.state.position   = self.quantity
+        self.state.quantity   = self.quantity
+        self._entry_time      = bar_time.strftime("%H:%M:%S")
+        self._entry_date      = bar_date
 
         side = "BUY" if direction == "LONG" else "SELL_SHORT"
         logger.info(f"  ORDER {side} {self.quantity} {self.symbol} @ MARKET")
@@ -126,8 +152,41 @@ class ORBStrategy(ORBBase):
         self, reason: str, exit_price: float,
         bar_date: date, bar_time: time,
     ) -> Order:
+        # P&L already computed by ORBBase._trigger_exit
+        pnl_per_unit = (
+            exit_price - self.state.entry_price
+            if self.state.direction == "LONG"
+            else self.state.entry_price - exit_price
+        )
+        pnl = round(pnl_per_unit * self.state.quantity, 2)
+
+        # Pull signal annotations if available
+        gap   = self.state.gap_signal
+        vol   = self.state.volume_signal
+
+        self.trades.append(TradeRecord(
+            date          = self._entry_date,
+            direction     = self.state.direction,
+            entry_time    = self._entry_time,
+            exit_time     = bar_time.strftime("%H:%M:%S"),
+            entry_price   = self.state.entry_price,
+            exit_price    = exit_price,
+            quantity      = self.state.quantity,
+            pnl           = pnl,
+            exit_reason   = reason,
+            range_high    = self.state.range_high,
+            range_low     = self.state.range_low,
+            range_width   = self.state.range_width,
+            gap_direction = gap.direction  if gap else "N/A",
+            gap_pct       = gap.gap_pct    if gap else 0.0,
+            vol_rel       = vol.confirm_rel_vol if vol else 0.0,
+        ))
+
         side = "SELL" if self.state.direction == "LONG" else "BUY_TO_COVER"
-        logger.info(f"  ORDER {side} {self.state.quantity} {self.symbol} @ MARKET | {reason}")
+        logger.info(
+            f"  ORDER {side} {self.state.quantity} {self.symbol} @ MARKET | "
+            f"{reason} | P&L ${pnl:+.2f}"
+        )
 
         return Order(
             symbol     = self.symbol,

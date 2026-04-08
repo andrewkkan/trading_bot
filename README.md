@@ -2,45 +2,53 @@
 
 A real-time trading bot that streams market data via Databento and executes
 orders through E*TRADE. Implements an Opening Range Breakout (ORB) strategy
-with support for both equity (shares) and options execution.
+with retest confirmation, adaptive range validation, and support for both
+equity (shares) and options execution.
+
+---
 
 ## Project structure
 
 ```
 trading_bot/
-├── main.py                         # Entry point — all run modes
-├── config.py                       # All settings and credentials
+├── main.py                          # Entry point — all run modes
+├── config.py                        # All settings and credentials
 ├── requirements.txt
 ├── Dockerfile
 ├── docker-compose.yml
 │
 ├── strategy/
-│   ├── orb_base.py                 # Abstract base — shared ORB logic (edit here first)
-│   ├── orb.py                      # Equity (shares) ORB — entry, stop, target
-│   ├── orb_options.py              # Options ORB — sizing, Black-Scholes, OPRA hook
-│   ├── option_pricing.py           # Black-Scholes pricer + greeks + IV estimates
-│   └── utils.py                    # Shared time/date utilities
+│   ├── orb_base.py                  # Abstract base — all price logic (edit here first)
+│   ├── orb.py                       # Equity execution + TradeRecord
+│   ├── orb_options.py               # Options execution + TradeRecord
+│   ├── retest_engine.py             # Breakout → retest → entry state machine
+│   ├── range_builder.py             # Adaptive opening range with rolling avg validation
+│   ├── gap_detector.py              # Overnight gap detection and classification
+│   ├── volume_evaluator.py          # Volume evaluation at breakout confirmation
+│   ├── option_pricing.py            # Black-Scholes pricer + greeks
+│   └── utils.py                     # Shared time/date utilities
 │
 ├── broker/
-│   ├── etrade.py                   # E*TRADE OAuth + equity + option order placement
-│   └── option_examples.py          # Runnable option order examples
+│   ├── etrade.py                    # E*TRADE OAuth + equity + option order placement
+│   └── option_examples.py           # Runnable option order examples
 │
 ├── backtest/
-│   └── run_orb_options.py          # Backtest runner, stats, CSV export, param sweep
+│   ├── run_orb_equity.py            # Equity backtest runner + parameter sweep
+│   └── run_orb_options.py           # Options backtest runner + parameter sweep
 │
 ├── data/
-│   └── feed.py                     # Databento live stream wrapper
+│   └── feed.py                      # Databento live stream wrapper
 │
 └── utils/
-    └── logger.py                   # Shared logging
+    └── logger.py                    # Shared logging
 ```
+
+---
 
 ## Strategy architecture
 
-All ORB variants inherit from `ORBBase` in `strategy/orb_base.py`. The base
-class owns everything shared: timestamp parsing, day reset, market hours gate,
-daily loss limit, and opening range construction. Subclasses implement only
-what is specific to their execution style.
+All ORB variants inherit from `ORBBase`. The base class owns every
+price-level decision. Subclasses implement execution only.
 
 ```
 ORBBase  (orb_base.py)
@@ -48,43 +56,111 @@ ORBBase  (orb_base.py)
 └── ORBOptionsStrategy (orb_options.py)  — trades options
 ```
 
-**If you want to change how the opening range is built** — different window
-logic, volume filters, gap handling — edit `orb_base.py` and both strategies
-pick it up automatically.
+**Edit `orb_base.py`** to change signal logic (range, retest, stop, target).
+**Edit `orb.py`** to change equity order construction.
+**Edit `orb_options.py`** to change option selection, sizing, or OPRA pricing.
 
-**If you want to change equity execution** — add short selling, change order
-type — edit `orb.py` only.
+### Signal flow per bar
 
-**If you want to change options execution** — sizing, stop/target logic, or
-plug in real OPRA pricing — edit `orb_options.py` only.
+```
+1. RangeBuilder   — adaptive opening range with rolling avg width validation
+2. GapDetector    — overnight gap vs prior close and prior high/low
+3. VolumeEvaluator— per-bar volume tracking; evaluated at entry
+4. RetestEngine   — breakout → retest → reconfirmation state machine
+                    (both LONG and SHORT directions, independent state)
+5. _on_entry()    — subclass builds and returns the order
+```
+
+### RetestEngine state machine
+
+```
+For each direction (LONG / SHORT) independently:
+
+  IDLE
+    → breakout_bars consecutive closes outside range boundary
+  BREAKOUT CONFIRMED
+    → retest_bars consecutive closes inside the window
+      OR opposing breakout confirmed (implicit credit via window expansion)
+  RETEST CREDITED
+    → reconfirm_bars consecutive closes outside boundary again
+  ENTRY
+
+Window expansion: when the opposing breakout is confirmed, the boundary
+on the first-confirmed direction's side expands to its breakout extreme,
+and that direction's retest is credited implicitly.
+
+No trade fires if price never retests. Skip = high probability only.
+```
+
+---
 
 ## Setup
 
 ```bash
-# 1. Copy credentials template and fill in your keys
+# 1. Copy and fill in credentials
 cp .env.example .env
+nano .env
 
 # 2. Build and run with Docker (recommended)
 docker compose up --build
 
 # 3. Or run directly
 pip install -r requirements.txt
-python main.py backtest_options
+python main.py backtest
 ```
+
+---
 
 ## Run modes
 
-```bash
-python main.py backtest           # ORB equity backtest against local DBN file
-python main.py backtest_options   # ORB options backtest (Black-Scholes pricing)
-python main.py sweep              # Parameter sweep across 8 ORB configs
-python main.py paper              # Live Databento feed, log orders but don't send
-python main.py live               # Live feed + real E*TRADE order execution
+| Mode | Command | Executes | Needs credentials |
+|---|---|---|---|
+| Equity backtest | `python main.py backtest` | `ORBStrategy` — trades shares | Databento only |
+| Equity sweep | `python main.py sweep_equity` | `ORBStrategy` — 8 param combos | Databento only |
+| Options backtest | `python main.py backtest_options` | `ORBOptionsStrategy` — trades options | Databento only |
+| Options sweep | `python main.py sweep` | `ORBOptionsStrategy` — 8 param combos | Databento only |
+| Paper trading | `python main.py paper` | `ORBOptionsStrategy` — live feed, orders logged not sent | Databento + E*TRADE |
+| Live trading | `python main.py live` | `ORBOptionsStrategy` — live feed, real option orders via E*TRADE | Databento + E*TRADE |
+
+**All backtest and sweep modes** run entirely from the local `.dbn.zst`
+file — no E*TRADE credentials needed, no network calls after the file
+is downloaded.
+
+**Paper and live modes** use `ORBOptionsStrategy` and require both a
+live Databento feed subscription and E*TRADE API keys. To trade shares
+instead of options in live mode, swap `ORBOptionsStrategy` for
+`ORBStrategy` in `run_live()` in `main.py`.
+
+### Backtest output
+
+Every run produces two CSV files in `backtest/results/`:
+
+```
+<label>_trades.csv    — one row per completed round-trip trade
+<label>_equity.csv    — daily cumulative P&L (equity curve)
 ```
 
-Backtest and sweep modes require no credentials — they run entirely from the
-local `.dbn.zst` file. Paper and live modes require both Databento and E*TRADE
-keys.
+Equity backtest summary includes: win rate, total P&L, avg win/loss,
+profit factor, annualised Sharpe, max drawdown, long/short breakdown,
+exit reason breakdown (stops/targets/EOD), and gap context breakdown.
+
+Options backtest summary includes the above plus: total premium paid,
+avg DTE, avg entry delta, and avg entry IV.
+
+### Parameter sweep
+
+Each sweep runs 8 preset parameter combinations and prints a ranked
+comparison table. Edit the `configs` list in `run_orb_equity.py` (equity)
+or `run_orb_options.py` (options) to customise the grid.
+
+```
+Label                          Trades  WinRate   TotalPnL  Sharpe     MaxDD     PF   L/S
+ORB15m_RR2_b3r3                   312   54.8%   +8,420.50    1.24   1,840.00   1.72  198L/114S
+ORB30m_RR3_b3r3                   187   57.2%   +6,110.00    1.08   2,200.00   1.65  ...
+...
+```
+
+---
 
 ## Downloading historical data
 
@@ -103,7 +179,7 @@ cost = client.metadata.get_cost(
 )
 print(f"Estimated cost: ${cost:.2f}")
 
-# Download (saves to disk, no re-download needed)
+# Download (saves to disk — no re-download needed)
 client.timeseries.get_range(
     dataset="XNAS.ITCH",
     schema="ohlcv-1s",
@@ -127,48 +203,105 @@ cost = client.metadata.get_cost(
 )
 ```
 
+---
+
 ## E*TRADE authentication
 
-E*TRADE uses OAuth 1.0a. On first run in `paper` or `live` mode, a browser
-window opens asking you to authorise the app. Paste the verifier code back
-into the terminal. This happens once per session.
+E*TRADE uses OAuth 1.0a. On first run in `paper` or `live` mode, a
+browser window opens asking you to authorise the app. Paste the
+verifier code back into the terminal. This happens once per session.
 
-The `stdin_open: true` and `tty: true` settings in `docker-compose.yml` keep
-stdin open so the verifier prompt works inside the container.
+On authentication, all accounts on the profile are printed:
 
-Backtest and sweep modes never touch E*TRADE — no authentication needed.
+```
+  accountIdKey                   accountId       type         description
+  AbCdEfGhIjKlMnOp               12345678        INDIVIDUAL   Brokerage  ← active
+  XyZaBcDeFgHiJkLm               87654321        IRA          Roth IRA
+```
+
+Set `ETRADE_ACCOUNT_ID` in your `.env` to the `accountIdKey` of the
+account you want to trade on. If unset, the first account is used.
+
+---
 
 ## Key configuration (config.py)
 
+### Credentials
+| Setting | Description |
+|---|---|
+| `DATABENTO_API_KEY` | Databento API key |
+| `ETRADE_CONSUMER_KEY` | E*TRADE OAuth consumer key |
+| `ETRADE_CONSUMER_SECRET` | E*TRADE OAuth consumer secret |
+| `ETRADE_ACCOUNT_ID` | accountIdKey to trade on (None = first account) |
+| `SANDBOX_MODE` | True = sandbox, False = live trading |
+
+### ORB signal
 | Setting | Default | Description |
 |---|---|---|
-| `SANDBOX_MODE` | `True` | Set `False` for live trading |
-| `ORB_OPENING_RANGE_MINUTES` | `15` | Length of opening range window |
-| `ORB_TARGET_DTE` | `1` | Days to expiry for options (0=0DTE) |
-| `ORB_STOP_LOSS_PCT` | `0.50` | Exit if option loses 50% of premium |
-| `ORB_TARGET_MULT` | `2.0` | Exit if option gains 2× entry premium |
-| `MAX_RISK_PER_TRADE` | `500.0` | Max premium dollars per trade |
+| `ORB_OPENING_RANGE_MINUTES` | `15` | Initial opening range window |
+| `ORB_RR_RATIO` | `2.0` | Take-profit = RR × range width |
+| `ORB_BREAKOUT_BARS` | `3` | Consecutive closes outside range to confirm breakout |
+| `ORB_RETEST_BARS` | `3` | Consecutive closes inside window to credit retest |
+| `ORB_RECONFIRM_BARS` | `3` | Consecutive closes outside window after retest to enter |
+| `ORB_MIN_HOLD_MINUTES` | `30` | Min minutes between entry and EOD close |
+
+### Adaptive range validation
+| Setting | Default | Description |
+|---|---|---|
+| `ORB_MAX_WINDOW_MULTIPLIER` | `16` | Cap expansion at N × initial window (240 min for 15m) |
+| `ORB_MIN_RANGE_PCT` | `0.5` | Range must be ≥ 50% of rolling average to be valid |
+| `ORB_ROLLING_LOOKBACK_DAYS` | `50` | Rolling average lookback (days) |
+| `ORB_MIN_BOOTSTRAP_DAYS` | `5` | Days before range validation kicks in |
+
+### Gap detection
+| Setting | Default | Description |
+|---|---|---|
+| `GAP_LOOKBACK_DAYS` | `50` | Rolling avg lookback for gap history |
+| `GAP_NONE_THRESHOLD` | `0.001` | abs(gap) below this = direction NONE (0.1%) |
+
+### Volume evaluation
+| Setting | Default | Description |
+|---|---|---|
+| `VOL_LOOKBACK_DAYS` | `50` | Rolling avg lookback for volume history |
+| `VOL_BARS_TO_TRACK` | `20` | Sliding window of recent bar volumes |
+
+### Risk
+| Setting | Default | Description |
+|---|---|---|
 | `MAX_DAILY_LOSS` | `1000.0` | Halt trading if day P&L drops below this |
+| `MAX_RISK_PER_TRADE` | `500.0` | Max option premium per trade (options only) |
+
+### Options-specific
+| Setting | Default | Description |
+|---|---|---|
+| `ORB_TARGET_DTE` | `1` | Days to expiry (0=0DTE, 1=next day, 7=weekly) |
+| `ORB_STRIKE_OFFSET_PCT` | `0.0` | 0.0=ATM, 0.005=0.5% OTM |
+
+---
 
 ## Upgrading to real options pricing
 
-The options strategy uses Black-Scholes by default. To upgrade to real OPRA
-bid/ask data, implement the stub in `strategy/orb_options.py`:
+The options strategy uses Black-Scholes by default. To upgrade to real
+OPRA bid/ask data, implement the stub in `strategy/orb_options.py`:
 
 ```python
-def _get_option_price(self, spot, direction, bar_date):
+def _get_option_price(self, spot, option_type, bar_date):
     if self.use_real_pricing:
-        # Load OPRA record matching (strike, expiry, direction, timestamp)
-        # Return an OptionPrice built from real bid/ask/greeks
+        # Look up OPRA record matching (symbol, strike, expiry, option_type)
+        # at bar_date and return an OptionPrice with real bid/ask/greeks
         ...
 ```
 
-Set `use_real_pricing = True` in `config.py` once implemented. Everything
-else — sizing, stops, targets, P&L tracking, CSV output — stays unchanged.
+Set `use_real_pricing = True` in the strategy constructor once implemented.
+
+---
 
 ## Going live
 
-1. Test thoroughly in backtest mode
-2. Run in `paper` mode for at least a few days
-3. In `config.py` set `SANDBOX_MODE = False`
-4. Run `python main.py live`
+1. Run `python main.py backtest` and `python main.py sweep_equity` —
+   understand your strategy's historical characteristics before risking money
+2. Run `python main.py paper` for at least a few days — confirm live
+   signals match backtest behaviour
+3. In `.env` set `ETRADE_ACCOUNT_ID` to your intended trading account
+4. In `config.py` set `SANDBOX_MODE = False`
+5. Run `python main.py live`

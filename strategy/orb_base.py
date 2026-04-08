@@ -14,7 +14,7 @@ What the base class owns (final — do not override):
   - Opening range construction (via RangeBuilder — adaptive, validated)
   - Gap detection per day (via GapDetector — stored on state, annotation only)
   - Volume evaluation at breakout (via VolumeEvaluator — stored on state, annotation only)
-  - Breakout detection   (both LONG and SHORT, N-bar confirmation, entry cutoff)
+  - Breakout/retest/entry state machine (via RetestEngine — both directions)
   - Position management  (stop/target on underlying price)
   - EOD flatten
 
@@ -44,6 +44,7 @@ from typing import Any
 from strategy.range_builder import RangeBuilder, RangeResult
 from strategy.gap_detector import GapDetector, GapSignal
 from strategy.volume_evaluator import VolumeEvaluator, VolumeSignal
+from strategy.retest_engine import RetestEngine, RetestResult
 from strategy.utils import ns_to_et, MARKET_OPEN, MARKET_CLOSE
 from utils.logger import get_logger
 
@@ -69,16 +70,13 @@ class ORBDayState:
     gap_signal:     object = None    # GapSignal — set on first bar at market open
     volume_signal:  object = None    # VolumeSignal — set when breakout is confirmed
     # Signal / position
-    trade_fired:         bool  = False
-    direction:           str   = ""      # "LONG" or "SHORT"
-    position:            int   = 0       # non-zero = in a trade
-    entry_price:         float = 0.0
-    stop_price:          float = 0.0
-    target_price:        float = 0.0
-    daily_pnl:           float = 0.0
-    # Breakout confirmation counters
-    long_confirm_count:  int   = 0   # consecutive closes above range_high
-    short_confirm_count: int   = 0   # consecutive closes below range_low
+    trade_fired:    bool  = False
+    direction:      str   = ""      # "LONG" or "SHORT"
+    position:       int   = 0       # non-zero = in a trade
+    entry_price:    float = 0.0
+    stop_price:     float = 0.0
+    target_price:   float = 0.0
+    daily_pnl:      float = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -98,7 +96,9 @@ class ORBBase(ABC):
         min_range_pct         : range must be >= this × rolling avg (default 0.5)
         rolling_lookback_days : days in rolling avg (default 50)
         min_bootstrap_days    : samples needed before validation applied (default 5)
-        confirm_bars          : consecutive closes required to confirm breakout (default 3)
+        breakout_bars         : consecutive closes outside range to confirm breakout (default 3)
+        retest_bars           : consecutive closes inside window to credit retest (default 3)
+        reconfirm_bars        : consecutive closes outside window after retest to enter (default 3)
         min_hold_minutes      : minimum minutes between entry and EOD close (default 30)
         gap_lookback_days     : rolling avg lookback for gap history (default 50)
         gap_none_threshold    : abs(gap_pct) below this = NONE direction (default 0.001)
@@ -116,7 +116,9 @@ class ORBBase(ABC):
         min_range_pct:         float = 0.5,
         rolling_lookback_days: int   = 50,
         min_bootstrap_days:    int   = 5,
-        confirm_bars:          int   = 3,
+        breakout_bars:         int   = 3,
+        retest_bars:           int   = 3,
+        reconfirm_bars:        int   = 3,
         min_hold_minutes:      int   = 30,
         gap_lookback_days:     int   = 50,
         gap_none_threshold:    float = 0.001,
@@ -127,7 +129,9 @@ class ORBBase(ABC):
         self.opening_range_minutes = opening_range_minutes
         self.rr_ratio              = rr_ratio
         self.max_daily_loss        = max_daily_loss
-        self.confirm_bars          = confirm_bars
+        self.breakout_bars         = breakout_bars
+        self.retest_bars           = retest_bars
+        self.reconfirm_bars        = reconfirm_bars
         self.min_hold_minutes      = min_hold_minutes
 
         self._range_builder = RangeBuilder(
@@ -149,6 +153,9 @@ class ORBBase(ABC):
             min_bootstrap_days    = min_bootstrap_days,
             bars_to_track         = vol_bars_to_track,
         )
+
+        # RetestEngine is reset on every new day in _reset_day()
+        self._retest_engine: RetestEngine | None = None
 
         self._current_date = None
         self.state         = self._make_day_state()
@@ -301,6 +308,13 @@ class ORBBase(ABC):
         self.state.range_skipped = result.skipped
 
         if not result.skipped:
+            # Initialise a fresh RetestEngine for this day's range
+            self._retest_engine = RetestEngine(
+                breakout_bars  = self.breakout_bars,
+                retest_bars    = self.retest_bars,
+                reconfirm_bars = self.reconfirm_bars,
+            )
+            self._retest_engine.set_range(result.high, result.low)
             self._on_range_set(result)
 
         return None
@@ -309,91 +323,72 @@ class ORBBase(ABC):
         self, bar_close: float, bar_date: date, bar_time: time,
     ) -> Any:
         """
-        Detect breakout with N-consecutive-bar confirmation.
-
-        Counters are independent — a cross to the opposite side resets
-        the active counter to 0 and starts the other at 1.
-        One trade per day; once trade_fired is True this method is a no-op.
+        Delegate to RetestEngine. Handles full breakout → retest → entry
+        state machine for both LONG and SHORT directions independently.
+        One position per day; once trade_fired is True this is a no-op.
         """
         if self.state.trade_fired:
             return None
 
-        # Latest entry cutoff — don't start a new trade if there isn't
-        # enough time left for a meaningful hold before EOD close.
-        # Cutoff = MARKET_CLOSE - min_hold_minutes - confirm_bars seconds
-        # (confirm_bars seconds account for the time still needed to confirm)
+        if self._retest_engine is None:
+            return None
+
+        # Latest entry cutoff
         cutoff_seconds = (
             MARKET_CLOSE.hour * 3600 + MARKET_CLOSE.minute * 60
             - self.min_hold_minutes * 60
-            - self.confirm_bars
+            - self.reconfirm_bars
         )
-        bar_seconds = bar_time.hour * 3600 + bar_time.minute * 60 + bar_time.second
+        bar_seconds = (
+            bar_time.hour * 3600
+            + bar_time.minute * 60
+            + bar_time.second
+        )
         if bar_seconds >= cutoff_seconds:
             return None
 
-        above = bar_close > self.state.range_high
-        below = bar_close < self.state.range_low
+        # Feed bar to engine — get list of events
+        events = self._retest_engine.on_bar(bar_close)
 
-        # Update counters — crossing to the other side resets both
-        if above:
-            self.state.long_confirm_count  += 1
-            self.state.short_confirm_count  = 0
-        elif below:
-            self.state.short_confirm_count += 1
-            self.state.long_confirm_count   = 0
-        else:
-            # Bar closed back inside the range — reset both
-            self.state.long_confirm_count  = 0
-            self.state.short_confirm_count = 0
-            return None
+        # Update state range boundaries in case of expansion
+        self.state.range_high  = self._retest_engine.range_high
+        self.state.range_low   = self._retest_engine.range_low
+        self.state.range_width = self.state.range_high - self.state.range_low
 
-        # Check if either direction has reached the confirmation threshold
-        if self.state.long_confirm_count >= self.confirm_bars:
-            direction = "LONG"
-        elif self.state.short_confirm_count >= self.confirm_bars:
-            direction = "SHORT"
-        else:
-            # Still accumulating — log progress on first and subsequent bars
-            count = self.state.long_confirm_count if above else self.state.short_confirm_count
-            side  = "LONG" if above else "SHORT"
-            logger.debug(
-                f"  Confirmation {count}/{self.confirm_bars} {side} "
-                f"@ {bar_close:.4f}"
-            )
-            return None
+        for result in events:
+            if result.event == "ENTRY":
+                direction = result.direction
+                self.state.trade_fired  = True
+                self.state.direction    = direction
+                self.state.position     = 1
+                self.state.entry_price  = bar_close
 
-        # Confirmation achieved — arm the trade
-        self.state.trade_fired  = True
-        self.state.direction    = direction
-        self.state.position     = 1
-        self.state.entry_price  = bar_close
+                if direction == "LONG":
+                    self.state.stop_price   = self.state.range_low
+                    self.state.target_price = (
+                        bar_close + self.rr_ratio * self.state.range_width
+                    )
+                else:
+                    self.state.stop_price   = self.state.range_high
+                    self.state.target_price = (
+                        bar_close - self.rr_ratio * self.state.range_width
+                    )
 
-        if direction == "LONG":
-            self.state.stop_price   = self.state.range_low
-            self.state.target_price = (
-                bar_close + self.rr_ratio * self.state.range_width
-            )
-        else:
-            self.state.stop_price   = self.state.range_high
-            self.state.target_price = (
-                bar_close - self.rr_ratio * self.state.range_width
-            )
+                logger.info(
+                    f"  ENTRY {direction} @ {bar_close:.4f} | "
+                    f"stop={self.state.stop_price:.4f} | "
+                    f"target={self.state.target_price:.4f}"
+                )
 
-        logger.info(
-            f"  BREAKOUT CONFIRMED {direction} "
-            f"({self.confirm_bars} consecutive bars) "
-            f"@ {bar_close:.4f} | "
-            f"stop={self.state.stop_price:.4f} | "
-            f"target={self.state.target_price:.4f}"
-        )
+                # Evaluate volume at moment of entry
+                self.state.volume_signal = self._volume_evaluator.evaluate(
+                    confirm_bars = self.reconfirm_bars,
+                    trade_date   = bar_date,
+                )
 
-        # Evaluate volume at the moment of confirmation
-        self.state.volume_signal = self._volume_evaluator.evaluate(
-            confirm_bars = self.confirm_bars,
-            trade_date   = bar_date,
-        )
+                return self._on_entry(direction, bar_close, bar_date, bar_time)
 
-        return self._on_entry(direction, bar_close, bar_date, bar_time)
+        return None
 
     def _manage_position(
         self,
@@ -463,6 +458,7 @@ class ORBBase(ABC):
                 f"[{self._current_date}] Day closed | "
                 f"P&L: ${self.daily_pnl:+.2f}"
             )
-        self._current_date = bar_date
-        self.state         = self._make_day_state()
+        self._current_date  = bar_date
+        self.state          = self._make_day_state()
+        self._retest_engine = None   # fresh engine created when range is set
         self._on_new_day(bar_date)

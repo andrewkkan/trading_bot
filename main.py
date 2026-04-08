@@ -28,9 +28,8 @@ logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 
 def run_equity_backtest():
-    logger.info("MODE: EQUITY BACKTEST")
-    strategy = ORBStrategy(
-        symbol                = Config.SYMBOLS[0],
+    from backtest.run_orb_equity import run_backtest
+    run_backtest(
         quantity              = 10,
         opening_range_minutes = Config.ORB_OPENING_RANGE_MINUTES,
         rr_ratio              = Config.ORB_RR_RATIO,
@@ -39,25 +38,16 @@ def run_equity_backtest():
         min_range_pct         = Config.ORB_MIN_RANGE_PCT,
         rolling_lookback_days = Config.ORB_ROLLING_LOOKBACK_DAYS,
         min_bootstrap_days    = Config.ORB_MIN_BOOTSTRAP_DAYS,
-        confirm_bars          = Config.ORB_CONFIRM_BARS,
+        breakout_bars         = Config.ORB_BREAKOUT_BARS,
+        retest_bars           = Config.ORB_RETEST_BARS,
+        reconfirm_bars        = Config.ORB_RECONFIRM_BARS,
         min_hold_minutes      = Config.ORB_MIN_HOLD_MINUTES,
         gap_lookback_days     = Config.GAP_LOOKBACK_DAYS,
         gap_none_threshold    = Config.GAP_NONE_THRESHOLD,
         vol_lookback_days     = Config.VOL_LOOKBACK_DAYS,
         vol_bars_to_track     = Config.VOL_BARS_TO_TRACK,
+        label                 = "orb_equity",
     )
-    store = db.DBNStore.from_file(Config.HISTORICAL_DATA_PATH)
-    total_bars = total_orders = 0
-    for record in store:
-        total_bars += 1
-        order = strategy.on_tick(record)
-        if order:
-            total_orders += 1
-            logger.info(
-                f"[ORDER] {order.side} {order.quantity} {order.symbol} "
-                f"| reason: {order.reason}"
-            )
-    logger.info(f"Done. Bars: {total_bars:,}  Orders: {total_orders}")
 
 
 # ---------------------------------------------------------------------------
@@ -77,12 +67,19 @@ def run_options_backtest():
         min_range_pct         = Config.ORB_MIN_RANGE_PCT,
         rolling_lookback_days = Config.ORB_ROLLING_LOOKBACK_DAYS,
         min_bootstrap_days    = Config.ORB_MIN_BOOTSTRAP_DAYS,
-        confirm_bars          = Config.ORB_CONFIRM_BARS,
+        breakout_bars         = Config.ORB_BREAKOUT_BARS,
+        retest_bars           = Config.ORB_RETEST_BARS,
+        reconfirm_bars        = Config.ORB_RECONFIRM_BARS,
         min_hold_minutes      = Config.ORB_MIN_HOLD_MINUTES,
         vol_lookback_days     = Config.VOL_LOOKBACK_DAYS,
         vol_bars_to_track     = Config.VOL_BARS_TO_TRACK,
         label                 = "orb_options",
     )
+
+
+def run_equity_sweep():
+    from backtest.run_orb_equity import sweep_parameters
+    sweep_parameters()
 
 
 def run_parameter_sweep():
@@ -110,7 +107,9 @@ async def run_live(paper: bool = False):
         min_range_pct         = Config.ORB_MIN_RANGE_PCT,
         rolling_lookback_days = Config.ORB_ROLLING_LOOKBACK_DAYS,
         min_bootstrap_days    = Config.ORB_MIN_BOOTSTRAP_DAYS,
-        confirm_bars          = Config.ORB_CONFIRM_BARS,
+        breakout_bars         = Config.ORB_BREAKOUT_BARS,
+        retest_bars           = Config.ORB_RETEST_BARS,
+        reconfirm_bars        = Config.ORB_RECONFIRM_BARS,
         min_hold_minutes      = Config.ORB_MIN_HOLD_MINUTES,
         gap_lookback_days     = Config.GAP_LOOKBACK_DAYS,
         gap_none_threshold    = Config.GAP_NONE_THRESHOLD,
@@ -163,8 +162,9 @@ if __name__ == "__main__":
     if   mode == "backtest":          run_equity_backtest()
     elif mode == "backtest_options":  run_options_backtest()
     elif mode == "sweep":             run_parameter_sweep()
+    elif mode == "sweep_equity":      run_equity_sweep()
     elif mode == "paper":             asyncio.run(run_live(paper=True))
     elif mode == "live":              asyncio.run(run_live(paper=False))
     else:
-        print("Usage: python main.py [backtest|backtest_options|sweep|paper|live]")
+        print("Usage: python main.py [backtest|backtest_options|sweep|sweep_equity|paper|live]")
         sys.exit(1)
