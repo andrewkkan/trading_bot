@@ -59,7 +59,10 @@ EOD flattens use bar_close with slippage applied.
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import time, date
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from backtest.result_store import ResultStore
 
 from strategy.range_builder import RangeBuilder, RangeResult
 from strategy.gap_detector import GapDetector, GapSignal
@@ -125,6 +128,7 @@ class ORBBase(ABC):
         vol_lookback_days     : rolling avg lookback for volume history (default 50)
         vol_bars_to_track     : sliding window of recent bar volumes (default 20)
         slippage              : fixed per-share slippage per fill (default 0.01)
+        result_store          : optional ResultStore for full event logging
     """
 
     def __init__(
@@ -146,6 +150,7 @@ class ORBBase(ABC):
         vol_lookback_days:     int   = 50,
         vol_bars_to_track:     int   = 20,
         slippage:              float = 0.01,
+        result_store:          Any   = None,
     ):
         self.symbol                = symbol
         self.opening_range_minutes = opening_range_minutes
@@ -156,6 +161,7 @@ class ORBBase(ABC):
         self.reconfirm_bars        = reconfirm_bars
         self.min_hold_minutes      = min_hold_minutes
         self.slippage              = slippage
+        self._result_store         = result_store
 
         self._range_builder = RangeBuilder(
             opening_range_minutes = opening_range_minutes,
@@ -267,6 +273,20 @@ class ORBBase(ABC):
         )
         if gap_signal is not None and gap_signal.is_new:
             self.state.gap_signal = gap_signal
+            if self._result_store:
+                self._result_store.log_event(
+                    bar_date, bar_time, "GAP_SIGNAL",
+                    bar_close, bar_high, bar_low,
+                    detail={
+                        "direction":      gap_signal.direction,
+                        "pct":            gap_signal.gap_pct,
+                        "multiple":       gap_signal.gap_multiple,
+                        "full_gap":       gap_signal.is_full_gap,
+                        "prior_range_pos":gap_signal.prior_range_pos,
+                        "dist_from_high": gap_signal.dist_from_high,
+                        "dist_from_low":  gap_signal.dist_from_low,
+                    },
+                )
 
         # Feed volume evaluator — updates rolling state on every bar
         self._volume_evaluator.on_bar(
@@ -330,7 +350,26 @@ class ORBBase(ABC):
         self.state.range_width   = result.width
         self.state.range_skipped = result.skipped
 
+        if result.skipped:
+            if self._result_store:
+                self._result_store.log_event(
+                    bar_date, bar_time, "RANGE_SKIPPED",
+                    bar_close, bar_high, bar_low,
+                    detail={"width": result.width, "window_min": result.window_minutes},
+                )
         if not result.skipped:
+            if self._result_store:
+                self._result_store.log_event(
+                    bar_date, bar_time, "RANGE_SET",
+                    bar_close, bar_high, bar_low,
+                    detail={
+                        "high":           result.high,
+                        "low":            result.low,
+                        "width":          result.width,
+                        "window_min":     result.window_minutes,
+                        "used_prior_day": result.used_prior_day,
+                    },
+                )
             # Initialise a fresh RetestEngine for this day's range
             self._retest_engine = RetestEngine(
                 breakout_bars  = self.breakout_bars,
@@ -379,6 +418,21 @@ class ORBBase(ABC):
         self.state.range_width = self.state.range_high - self.state.range_low
 
         for result in events:
+            if result.event in ("BREAKOUT", "RETEST", "EXPAND") and self._result_store:
+                etype = (
+                    f"BREAKOUT_{result.direction}" if result.event == "BREAKOUT" else
+                    f"RETEST_{result.direction}"   if result.event == "RETEST"   else
+                    "WINDOW_EXPAND"
+                )
+                self._result_store.log_event(
+                    bar_date, bar_time, etype,
+                    bar_close, bar_close, bar_close,
+                    detail={
+                        "direction":    result.direction,
+                        "range_high":   result.range_high,
+                        "range_low":    result.range_low,
+                    },
+                )
             if result.event == "ENTRY":
                 direction = result.direction
                 self.state.trade_fired = True
@@ -413,6 +467,31 @@ class ORBBase(ABC):
                     confirm_bars = self.reconfirm_bars,
                     trade_date   = bar_date,
                 )
+
+                if self._result_store:
+                    vol = self.state.volume_signal
+                    self._result_store.log_event(
+                        bar_date, bar_time, f"ENTRY_{direction}",
+                        bar_close, bar_close, bar_close,
+                        detail={
+                            "fill":      fill_price,
+                            "stop":      self.state.stop_price,
+                            "target":    self.state.target_price,
+                            "slippage":  self.slippage,
+                        },
+                    )
+                    if vol:
+                        self._result_store.log_event(
+                            bar_date, bar_time, "VOLUME_SIGNAL",
+                            bar_close, bar_close, bar_close,
+                            detail={
+                                "rel_vol":      vol.confirm_rel_vol,
+                                "is_increasing":vol.is_increasing,
+                                "is_decreasing":vol.is_decreasing,
+                                "confirm_vol":  vol.confirm_volume,
+                                "avg_vol":      vol.avg_volume,
+                            },
+                        )
 
                 return self._on_entry(direction, bar_close, bar_date, bar_time)
 
@@ -524,6 +603,27 @@ class ORBBase(ABC):
             f"entry={self.state.entry_price:.4f} | "
             f"daily P&L=${self.state.daily_pnl:+.2f}"
         )
+
+        if self._result_store:
+            etype = (
+                "STOP_LOSS"   if reason == "Stop loss"   else
+                "TAKE_PROFIT" if reason == "Take profit" else
+                "EOD_CLOSE"
+            )
+            self._result_store.log_event(
+                bar_date, bar_time, etype,
+                fill_price, fill_price, fill_price,
+                detail={
+                    "reason":      reason,
+                    "level":       exit_price,
+                    "fill":        fill_price,
+                    "slippage":    self.slippage,
+                    "pnl":         round(pnl_per_unit * abs(self.state.position), 4),
+                    "entry_price": self.state.entry_price,
+                    "direction":   self.state.direction,
+                },
+            )
+
         exit_price = fill_price   # pass slippage-adjusted price to subclass
 
         order = self._on_exit(reason, exit_price, bar_date, bar_time)

@@ -122,6 +122,7 @@ class ORBOptionsStrategy(ORBBase):
         vol_lookback_days:     int   = 50,
         vol_bars_to_track:     int   = 20,
         slippage:              float = 0.01,
+        result_store:          object = None,
         use_real_pricing:      bool  = False,
         spread_pct:            float = 0.05,
     ):
@@ -151,6 +152,7 @@ class ORBOptionsStrategy(ORBBase):
             vol_lookback_days     = vol_lookback_days,
             vol_bars_to_track     = vol_bars_to_track,
             slippage              = slippage,
+            result_store          = result_store,
         )
 
     # -----------------------------------------------------------------------
@@ -277,7 +279,7 @@ class ORBOptionsStrategy(ORBBase):
             f"option P&L=${option_pnl:+.2f} | {reason}"
         )
 
-        self.trades.append(TradeRecord(
+        record = TradeRecord(
             date             = self._current_date,
             direction        = self.state.direction,
             option_type      = self.state.option_type,
@@ -295,7 +297,32 @@ class ORBOptionsStrategy(ORBBase):
             exit_reason      = reason,
             entry_delta      = self.state.entry_delta,
             entry_iv         = self.state.entry_iv,
-        ))
+        )
+        self.trades.append(record)
+
+        if self._result_store:
+            self._result_store.log_trade(
+                bar_date        = self._current_date,
+                direction       = record.direction,
+                entry_time      = record.entry_time,
+                entry_price     = record.entry_option,
+                exit_time       = record.exit_time,
+                exit_price      = record.exit_option,
+                quantity        = record.contracts,
+                pnl             = record.pnl,
+                exit_reason     = record.exit_reason,
+                range_high      = self.state.range_high,
+                range_low       = self.state.range_low,
+                range_width     = self.state.range_width,
+                stop_price      = self.state.stop_price,
+                target_price    = self.state.target_price,
+                gap_signal      = self.state.gap_signal,
+                volume_signal   = self.state.volume_signal,
+                window_expanded = False,
+                breakout_bars   = self.breakout_bars,
+                retest_bars     = self.retest_bars,
+                reconfirm_bars  = self.reconfirm_bars,
+            )
 
         return {
             "symbol":      self.symbol,

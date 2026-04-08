@@ -21,6 +21,7 @@ import databento as db
 
 from config import Config
 from strategy.orb import ORBStrategy, TradeRecord
+from backtest.result_store import ResultStore
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -51,6 +52,7 @@ def run_backtest(
     vol_lookback_days:     int   = 50,
     vol_bars_to_track:     int   = 20,
     slippage:              float = 0.01,
+    db_path:               str   | None = None,
     start_date:            date  | None = None,
     end_date:              date  | None = None,
     dates:                 list  | None = None,
@@ -73,6 +75,13 @@ def run_backtest(
     )
     logger.info("=" * 65)
 
+    # Set up result store
+    if db_path is None:
+        safe = label.replace(" ", "_").replace("/", "-")
+        db_path = os.path.join(RESULTS_DIR, f"{safe}.db")
+    result_store = ResultStore(db_path=db_path, symbol=symbol)
+    result_store.open()
+
     strategy = ORBStrategy(
         symbol                = symbol,
         quantity              = quantity,
@@ -92,6 +101,7 @@ def run_backtest(
         vol_lookback_days     = vol_lookback_days,
         vol_bars_to_track     = vol_bars_to_track,
         slippage              = slippage,
+        result_store          = result_store,
     )
 
     # Normalise date filter inputs
@@ -118,6 +128,8 @@ def run_backtest(
         strategy.on_tick(record)
 
     logger.info(f"Bars processed: {bars_processed:,}  skipped: {bars_skipped:,}")
+    result_store.close()
+    logger.info(f"Results saved → {db_path}")
 
     summary = _compute_summary(strategy.trades, label)
     _print_summary(summary)

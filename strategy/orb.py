@@ -83,6 +83,7 @@ class ORBStrategy(ORBBase):
         vol_lookback_days:     int   = 50,
         vol_bars_to_track:     int   = 20,
         slippage:              float = 0.01,
+        result_store:          object = None,
     ):
         self.quantity = quantity
         self.trades: list[TradeRecord] = []
@@ -104,6 +105,7 @@ class ORBStrategy(ORBBase):
             vol_lookback_days     = vol_lookback_days,
             vol_bars_to_track     = vol_bars_to_track,
             slippage              = slippage,
+            result_store          = result_store,
         )
 
     # -----------------------------------------------------------------------
@@ -166,7 +168,7 @@ class ORBStrategy(ORBBase):
         gap   = self.state.gap_signal
         vol   = self.state.volume_signal
 
-        self.trades.append(TradeRecord(
+        trade = TradeRecord(
             date          = self._entry_date,
             direction     = self.state.direction,
             entry_time    = self._entry_time,
@@ -179,10 +181,36 @@ class ORBStrategy(ORBBase):
             range_high    = self.state.range_high,
             range_low     = self.state.range_low,
             range_width   = self.state.range_width,
-            gap_direction = gap.direction  if gap else "N/A",
-            gap_pct       = gap.gap_pct    if gap else 0.0,
+            gap_direction = gap.direction       if gap else "N/A",
+            gap_pct       = gap.gap_pct         if gap else 0.0,
             vol_rel       = vol.confirm_rel_vol if vol else 0.0,
-        ))
+        )
+        self.trades.append(trade)
+
+        if self._result_store:
+            self._result_store.log_trade(
+                bar_date        = self._entry_date,
+                direction       = trade.direction,
+                entry_time      = trade.entry_time,
+                entry_price     = trade.entry_price,
+                exit_time       = trade.exit_time,
+                exit_price      = trade.exit_price,
+                quantity        = trade.quantity,
+                pnl             = trade.pnl,
+                exit_reason     = trade.exit_reason,
+                range_high      = self.state.range_high,
+                range_low       = self.state.range_low,
+                range_width     = self.state.range_width,
+                stop_price      = self.state.stop_price,
+                target_price    = self.state.target_price,
+                gap_signal      = self.state.gap_signal,
+                volume_signal   = self.state.volume_signal,
+                window_expanded = getattr(self._retest_engine, '_first_confirmed', None) is not None
+                                  and getattr(self._retest_engine, 'range_high', 0) != self.state.range_high,
+                breakout_bars   = self.breakout_bars,
+                retest_bars     = self.retest_bars,
+                reconfirm_bars  = self.reconfirm_bars,
+            )
 
         side = "SELL" if self.state.direction == "LONG" else "BUY_TO_COVER"
         logger.info(

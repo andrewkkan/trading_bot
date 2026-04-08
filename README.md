@@ -133,9 +133,10 @@ instead of options in live mode, swap `ORBOptionsStrategy` for
 
 ### Backtest output
 
-Every run produces two CSV files in `backtest/results/`:
+Every run produces a SQLite database and two CSV files in `backtest/results/`:
 
 ```
+<label>.db            — full event log, trades, daily summary (queryable)
 <label>_trades.csv    — one row per completed round-trip trade
 <label>_equity.csv    — daily cumulative P&L (equity curve)
 ```
@@ -146,6 +147,67 @@ exit reason breakdown (stops/targets/EOD), and gap context breakdown.
 
 Options backtest summary includes the above plus: total premium paid,
 avg DTE, avg entry delta, and avg entry IV.
+
+### Querying results
+
+The SQLite database has three tables:
+
+- **`events`** — every intraday state transition with a `detail` JSON field.
+  Event types: RANGE_SET, RANGE_SKIPPED, GAP_SIGNAL, BREAKOUT_LONG/SHORT,
+  RETEST_LONG/SHORT, WINDOW_EXPAND, ENTRY_LONG/SHORT, VOLUME_SIGNAL,
+  STOP_LOSS, TAKE_PROFIT, EOD_CLOSE.
+- **`trades`** — one row per completed round-trip, enriched with range context,
+  gap signal, volume signal, stop/target prices, and retest metadata.
+- **`daily_summary`** — one row per trading day with range, gap, and trade outcome.
+
+Open the `.db` file in **DB Browser for SQLite** (sqlitebrowser.org) for
+visual table browsing, or query with pandas:
+
+```python
+import sqlite3
+import pandas as pd
+
+conn = sqlite3.connect("backtest/results/orb_equity.db")
+
+# Replay one day — every event in order
+events = pd.read_sql(
+    "SELECT time, event_type, bar_close, detail "
+    "FROM events WHERE date = '2024-03-14' ORDER BY id", conn)
+
+# Win rate and avg P&L by gap direction
+pd.read_sql(
+    "SELECT gap_direction, COUNT(*) trades, "
+    "ROUND(AVG(pnl),2) avg_pnl, "
+    "ROUND(100.0*SUM(CASE WHEN pnl>0 THEN 1 ELSE 0 END)/COUNT(*),1) win_rate "
+    "FROM trades GROUP BY gap_direction", conn)
+
+# All trades on gap-up days
+pd.read_sql(
+    "SELECT date, direction, entry_price, exit_price, pnl, exit_reason "
+    "FROM trades WHERE gap_direction = 'UP' ORDER BY date", conn)
+
+# Days where the opening window expanded
+pd.read_sql(
+    "SELECT date, time, detail FROM events "
+    "WHERE event_type = 'WINDOW_EXPAND' ORDER BY date", conn)
+
+# Retests that preceded winning trades
+pd.read_sql(
+    "SELECT e.date, e.time, e.event_type, t.pnl "
+    "FROM events e JOIN trades t ON e.date = t.date "
+    "WHERE e.event_type IN ('RETEST_LONG','RETEST_SHORT') AND t.pnl > 0", conn)
+
+# Days where range was skipped (too narrow)
+pd.read_sql(
+    "SELECT date, window_minutes, range_width "
+    "FROM daily_summary WHERE range_skipped = 1 ORDER BY date", conn)
+
+# P&L breakdown by exit reason
+pd.read_sql(
+    "SELECT exit_reason, COUNT(*) trades, "
+    "ROUND(SUM(pnl),2) total_pnl, ROUND(AVG(pnl),2) avg_pnl "
+    "FROM trades GROUP BY exit_reason", conn)
+```
 
 ### Running with custom dates or parameters
 
