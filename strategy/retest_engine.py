@@ -140,22 +140,37 @@ class RetestEngine:
     def range_low(self) -> float:
         return self._range_low
 
-    def on_bar(self, bar_close: float) -> list[RetestResult]:
+    def on_bar(
+        self,
+        bar_close: float,
+        bar_high:  float,
+        bar_low:   float,
+    ) -> list[RetestResult]:
         """
-        Process one bar. Returns a list of RetestResult events that
-        occurred on this bar (usually empty or one item, occasionally
-        two if both directions trigger simultaneously).
+        Process one bar using the full candle (high/low/close).
 
-        Caller should process results in order and act on ENTRY events.
+        Breakout/reconfirm: entire candle must be outside the boundary.
+          LONG : bar_low  > range_high  (no part of bar inside)
+          SHORT: bar_high < range_low   (no part of bar inside)
+
+        Retest: entire candle must be inside the window.
+          bar_high <= range_high AND bar_low >= range_low
+
+        This is stricter than close-only — a bar that pokes outside
+        the range during the retest phase resets the retest counter.
         """
         if not self._initialized:
             return []
 
         results = []
 
-        above  = bar_close > self._range_high
-        below  = bar_close < self._range_low
-        inside = not above and not below
+        # Full-candle conditions
+        above  = bar_low  > self._range_high   # entire bar above range
+        below  = bar_high < self._range_low    # entire bar below range
+        inside = (
+            bar_high <= self._range_high
+            and bar_low >= self._range_low
+        )
 
         # ---- update both directions ----
         long_result  = self._update_direction(
@@ -164,6 +179,8 @@ class RetestEngine:
             on_side   = above,
             inside    = inside,
             bar_close = bar_close,
+            bar_high  = bar_high,
+            bar_low   = bar_low,
         )
         short_result = self._update_direction(
             state     = self.short,
@@ -171,6 +188,8 @@ class RetestEngine:
             on_side   = below,
             inside    = inside,
             bar_close = bar_close,
+            bar_high  = bar_high,
+            bar_low   = bar_low,
         )
 
         # ---- check window expansion ----
@@ -249,9 +268,11 @@ class RetestEngine:
         self,
         state:     DirectionState,
         direction: str,
-        on_side:   bool,    # True if bar_close is on the breakout side
-        inside:    bool,    # True if bar_close is inside the window
+        on_side:   bool,    # True if entire bar is on the breakout side
+        inside:    bool,    # True if entire bar is inside the window
         bar_close: float,
+        bar_high:  float,
+        bar_low:   float,
     ) -> RetestResult | None:
         """
         Advance one direction through its state machine.
@@ -266,7 +287,10 @@ class RetestEngine:
                 state.breakout_count += 1
                 if state.breakout_count >= self.breakout_bars:
                     state.breakout_confirmed = True
-                    state.breakout_extreme   = bar_close
+                    # Use the actual extreme of the candle for window expansion
+                    state.breakout_extreme = (
+                        bar_high if direction == "LONG" else bar_low
+                    )
                     if self._first_confirmed is None:
                         self._first_confirmed = direction
                     logger.info(

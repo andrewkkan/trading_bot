@@ -321,7 +321,7 @@ class ORBBase(ABC):
             )
 
         # ---- watch for breakout ----
-        return self._check_breakout(bar_close, bar_date, bar_time)
+        return self._check_breakout(bar_close, bar_high, bar_low, bar_date, bar_time)
 
     # -----------------------------------------------------------------------
     # Final shared logic — all price decisions live here
@@ -381,7 +381,8 @@ class ORBBase(ABC):
         return None
 
     def _check_breakout(
-        self, bar_close: float, bar_date: date, bar_time: time,
+        self, bar_close: float, bar_high: float, bar_low: float,
+        bar_date: date, bar_time: time,
     ) -> Any:
         """
         Delegate to RetestEngine. Handles full breakout → retest → entry
@@ -409,7 +410,7 @@ class ORBBase(ABC):
             return None
 
         # Feed bar to engine — get list of events
-        events = self._retest_engine.on_bar(bar_close)
+        events = self._retest_engine.on_bar(bar_close, bar_high, bar_low)
 
         # Update state range boundaries in case of expansion
         self.state.range_high  = self._retest_engine.range_high
