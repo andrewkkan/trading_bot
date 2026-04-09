@@ -16,6 +16,7 @@ the sweep_parameters() function at the bottom of this file.
 import csv
 import os
 import math
+from multiprocessing import Pool
 from datetime import date, datetime
 from collections import defaultdict
 
@@ -305,6 +306,22 @@ def _save_results(trades: list[TradeRecord], summary: dict, label: str):
 # Parameter sweep — run multiple configs, print comparison table
 # ---------------------------------------------------------------------------
 
+def _sweep_worker_options(args):
+    orb_min, rr, dte, bo, rt, rc, hold, lbl = args
+    return run_backtest(
+        opening_range_minutes = orb_min,
+        rr_ratio              = rr,
+        target_dte            = dte,
+        breakout_bars         = bo,
+        retest_bars           = rt,
+        reconfirm_bars        = rc,
+        min_hold_minutes      = hold,
+        label                 = lbl,
+    )
+
+
+
+
 def sweep_parameters():
     """
     Run a grid of parameter combinations and print a ranked comparison.
@@ -314,29 +331,21 @@ def sweep_parameters():
     """
     configs = [
         # (orb_min, rr, dte, breakout, retest, reconfirm, hold, label)
-        (5,  2.0, 0, 3, 3, 3, 30, "ORB5m_0DTE_RR2_b3r3"),
-        (5,  2.0, 1, 3, 3, 3, 30, "ORB5m_1DTE_RR2_b3r3"),
-        (15, 2.0, 0, 3, 3, 3, 30, "ORB15m_0DTE_RR2_b3r3"),
-        (15, 2.0, 1, 3, 3, 3, 30, "ORB15m_1DTE_RR2_b3r3"),
-        (15, 3.0, 1, 3, 3, 3, 30, "ORB15m_1DTE_RR3_b3r3"),
-        (15, 2.0, 1, 5, 3, 3, 30, "ORB15m_1DTE_RR2_b5r3"),
-        (30, 2.0, 1, 3, 3, 3, 30, "ORB30m_1DTE_RR2_b3r3"),
-        (30, 2.0, 7, 3, 3, 3, 30, "ORB30m_7DTE_RR2_b3r3"),
+        # (5,  2.0, 0, 3, 3, 3, 30, "ORB5m_0DTE_RR2_b3r3"),
+        # (5,  2.0, 1, 3, 3, 3, 30, "ORB5m_1DTE_RR2_b3r3"),
+        # (15, 2.0, 0, 3, 3, 3, 30, "ORB15m_0DTE_RR2_b3r3"),
+        # (15, 2.0, 1, 3, 3, 3, 30, "ORB15m_1DTE_RR2_b3r3"),
+        # (15, 3.0, 1, 3, 3, 3, 30, "ORB15m_1DTE_RR3_b3r3"),
+        # (15, 2.0, 1, 5, 3, 3, 30, "ORB15m_1DTE_RR2_b5r3"),
+        # (30, 2.0, 1, 3, 3, 3, 30, "ORB30m_1DTE_RR2_b3r3"),
+        # (30, 2.0, 7, 3, 3, 3, 30, "ORB30m_7DTE_RR2_b3r3"),
+        (15, 2.0, 1, 10, 45, 5, 30, "ORB15m_1DTE_RR2_b10r45r5"),
+        (15, 3.0, 1, 10, 45, 5, 30, "ORB15m_1DTE_RR3_b10r45r5"),
     ]
 
-    results = []
-    for (orb_min, rr, dte, bo, rt, rc, hold, lbl) in configs:
-        summary = run_backtest(
-            opening_range_minutes = orb_min,
-            rr_ratio              = rr,
-            target_dte            = dte,
-            breakout_bars         = bo,
-            retest_bars           = rt,
-            reconfirm_bars        = rc,
-            min_hold_minutes      = hold,
-            label                 = lbl,
-        )
-        results.append(summary)
+    with Pool(processes=min(len(configs), os.cpu_count())) as pool:
+        results = pool.map(_sweep_worker_options, configs)
+    results = [r for r in results if r is not None]
 
     # Print ranked comparison table
     print("\n" + "=" * 90)

@@ -14,6 +14,7 @@ Output:
 import csv
 import os
 import math
+from multiprocessing import Pool
 from datetime import date, datetime
 from collections import defaultdict
 
@@ -342,6 +343,22 @@ def _save_results(trades: list[TradeRecord], summary: dict, label: str):
 # Parameter sweep
 # ---------------------------------------------------------------------------
 
+def _sweep_worker_equity(args):
+    orb_min, rr, qty, bo, rt, rc, hold, lbl = args
+    return run_backtest(
+        quantity              = qty,
+        opening_range_minutes = orb_min,
+        rr_ratio              = rr,
+        breakout_bars         = bo,
+        retest_bars           = rt,
+        reconfirm_bars        = rc,
+        min_hold_minutes      = hold,
+        label                 = lbl,
+    )
+
+
+
+
 def sweep_parameters():
     """
     Run a grid of parameter combinations and print a ranked comparison.
@@ -349,29 +366,19 @@ def sweep_parameters():
     """
     configs = [
         # (orb_min, rr, qty, breakout, retest, reconfirm, hold, label)
-        (15, 2.0, 10, 3, 3, 3, 30, "ORB15m_RR2_b3r3"),
-        (15, 3.0, 10, 3, 3, 3, 30, "ORB15m_RR3_b3r3"),
-        (15, 2.0, 10, 5, 3, 3, 30, "ORB15m_RR2_b5r3"),
-        (15, 2.0, 10, 3, 5, 3, 30, "ORB15m_RR2_b3r5"),
-        (30, 2.0, 10, 3, 3, 3, 30, "ORB30m_RR2_b3r3"),
-        (30, 3.0, 10, 3, 3, 3, 30, "ORB30m_RR3_b3r3"),
-        (5,  2.0, 10, 3, 3, 3, 30, "ORB5m_RR2_b3r3"),
-        (5,  3.0, 10, 3, 3, 3, 30, "ORB5m_RR3_b3r3"),
+        (15, 2.0, 10, 10, 45, 5, 30, "ORB15m_RR2_b10r45r5"),
+        (15, 3.0, 10, 10, 45, 5, 30, "ORB15m_RR3_b10r45r5"),
+        # (15, 2.0, 10, 5, 3, 3, 30, "ORB15m_RR2_b5r3"),
+        # (15, 2.0, 10, 3, 5, 3, 30, "ORB15m_RR2_b3r5"),
+        # (30, 2.0, 10, 3, 3, 3, 30, "ORB30m_RR2_b3r3"),
+        # (30, 3.0, 10, 3, 3, 3, 30, "ORB30m_RR3_b3r3"),
+        # (5,  2.0, 10, 3, 3, 3, 30, "ORB5m_RR2_b3r3"),
+        # (5,  3.0, 10, 3, 3, 3, 30, "ORB5m_RR3_b3r3"),
     ]
 
-    results = []
-    for (orb_min, rr, qty, bo, rt, rc, hold, lbl) in configs:
-        summary = run_backtest(
-            quantity              = qty,
-            opening_range_minutes = orb_min,
-            rr_ratio              = rr,
-            breakout_bars         = bo,
-            retest_bars           = rt,
-            reconfirm_bars        = rc,
-            min_hold_minutes      = hold,
-            label                 = lbl,
-        )
-        results.append(summary)
+    with Pool(processes=min(len(configs), os.cpu_count())) as pool:
+        results = pool.map(_sweep_worker_equity, configs)
+    results = [r for r in results if r is not None]
 
     print("\n" + "=" * 95)
     print(
