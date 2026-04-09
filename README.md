@@ -174,7 +174,7 @@ visual table browsing, or query with pandas:
 import sqlite3
 import pandas as pd
 
-conn = sqlite3.connect("backtest/results/orb_equity.db")
+conn = sqlite3.connect("backtest/results/ORB15m_RR2_b3r5.db")
 
 # What params produced these results?
 pd.read_sql("SELECT * FROM runs", conn)

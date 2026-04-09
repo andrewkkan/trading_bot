@@ -209,14 +209,35 @@ def select_strike(spot: float, offset_pct: float = 0.005, interval: float = 1.0)
     return float(strike)
 
 
-def days_to_nearest_expiry(target_dte: int = 1) -> float:
+def days_to_nearest_expiry(target_dte: int = 1, bar_time=None) -> float:
     """
-    Convert a target DTE (days to expiry) to fractional years.
-    Uses 252 trading days per year.
+    Convert a target DTE to fractional years, accounting for intraday
+    time decay when bar_time is provided.
 
-    target_dte=0  →  same-day expiry  (0DTE)  →  0.5/252
-    target_dte=1  →  next day                 →  1/252
-    target_dte=7  →  next weekly              →  7/252
+    Without bar_time: uses the full DTE as trading days (entry use case).
+    With bar_time: subtracts the fraction of the current trading day
+    already elapsed so that T decreases continuously through the session.
+
+    target_dte=0  →  same-day expiry (0DTE)
+    target_dte=1  →  next day
+    target_dte=7  →  next weekly
+
+    Trading session: 09:30–16:00 ET = 6.5 hours = 390 minutes.
     """
-    dte = max(target_dte, 0.5)      # floor at half a day to avoid T=0 edge case
-    return dte / 252.0
+    from datetime import time as dtime
+    MARKET_OPEN_MIN  = 9 * 60 + 30    # 570
+    MARKET_CLOSE_MIN = 16 * 60        # 960
+    SESSION_MINUTES  = MARKET_CLOSE_MIN - MARKET_OPEN_MIN  # 390
+
+    base_dte = max(target_dte, 0.5)
+
+    if bar_time is not None:
+        bar_min = bar_time.hour * 60 + bar_time.minute
+        elapsed = max(0, bar_min - MARKET_OPEN_MIN)
+        day_fraction_remaining = max(0.0, 1.0 - elapsed / SESSION_MINUTES)
+        # For 0DTE: T shrinks from 0.5/252 to ~0 through the day
+        # For 1DTE: T shrinks from 1/252 toward 0/252 through the day
+        dte = max(target_dte - 1 + day_fraction_remaining, 0.5 / SESSION_MINUTES)
+        return dte / 252.0
+
+    return base_dte / 252.0

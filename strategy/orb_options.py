@@ -191,7 +191,7 @@ class ORBOptionsStrategy(ORBBase):
         """
         option_type = "CALL" if direction == "LONG" else "PUT"
 
-        opt = self._get_option_price(bar_close, option_type, bar_date)
+        opt = self._get_option_price(bar_close, option_type, bar_date, bar_time=bar_time)
         if opt is None:
             return None
 
@@ -250,7 +250,8 @@ class ORBOptionsStrategy(ORBBase):
         P&L is option-premium based (not underlying points).
         """
         opt = self._get_option_price(
-            exit_price, self.state.option_type, bar_date
+            exit_price, self.state.option_type, bar_date,
+            strike=self.state.strike, bar_time=bar_time,
         )
         exit_option = opt.price if opt else self.state.entry_option * 0.1
 
@@ -341,9 +342,15 @@ class ORBOptionsStrategy(ORBBase):
 
     def _get_option_price(
         self, spot: float, option_type: str, bar_date: date,
+        strike: float | None = None,
+        bar_time=None,
     ) -> OptionPrice | None:
         """
         Price the option at the given underlying spot price.
+        strike should be passed explicitly at exit to reprice the same
+        contract that was bought at entry — if omitted, a new ATM strike
+        is selected (entry use case only).
+        bar_time is used to model intraday theta decay correctly.
 
         To upgrade to real OPRA data:
           1. Set use_real_pricing=True in config
@@ -357,16 +364,17 @@ class ORBOptionsStrategy(ORBBase):
                 "Set use_real_pricing=False to use Black-Scholes."
             )
 
-        strike = select_strike(
-            spot,
-            offset_pct = self.strike_offset_pct if option_type == "CALL"
-                         else -self.strike_offset_pct,
-            interval   = self.strike_interval,
-        )
+        if strike is None:
+            strike = select_strike(
+                spot,
+                offset_pct = self.strike_offset_pct if option_type == "CALL"
+                             else -self.strike_offset_pct,
+                interval   = self.strike_interval,
+            )
         return price_option(
             S           = spot,
             K           = strike,
-            T           = days_to_nearest_expiry(self.target_dte),
+            T           = days_to_nearest_expiry(self.target_dte, bar_time),
             sigma       = get_iv_estimate(bar_date.year),
             option_type = option_type,
             spread_pct  = self.spread_pct,

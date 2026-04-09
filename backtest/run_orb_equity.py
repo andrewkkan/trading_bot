@@ -79,6 +79,11 @@ def run_backtest(
     if db_path is None:
         safe = label.replace(" ", "_").replace("/", "-")
         db_path = os.path.join(RESULTS_DIR, f"{safe}.db")
+    # Remove stale db so rerunning same label starts fresh
+    if os.path.exists(db_path):
+        os.remove(db_path)
+        logger.info(f"Removed stale db: {db_path}")
+
     result_store = ResultStore(db_path=db_path, symbol=symbol)
     result_store.open()
     result_store.log_run(label, {

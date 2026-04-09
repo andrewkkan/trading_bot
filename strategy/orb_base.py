@@ -296,6 +296,9 @@ class ORBBase(ABC):
         )
 
         if bar_time < MARKET_OPEN or bar_time >= MARKET_CLOSE:
+            # EOD flatten — must be checked before the market hours gate
+            if bar_time >= MARKET_CLOSE and self.has_position:
+                return self._eod_close(bar_close, bar_date, bar_time)
             return None
 
         if self.daily_pnl <= -abs(self.max_daily_loss):
@@ -310,10 +313,6 @@ class ORBBase(ABC):
         # ---- skip day if range was invalid ----
         if self.state.range_skipped:
             return None
-
-        # ---- EOD close ----
-        if bar_time >= MARKET_CLOSE and self.has_position:
-            return self._eod_close(bar_close, bar_date, bar_time)
 
         # ---- manage open position ----
         if self.has_position:
